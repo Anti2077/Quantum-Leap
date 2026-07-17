@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "iperf3-ui",
+  "version": "0.1.0",
+  "identifier": "com.codex.iperf3ui",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "iperf3 Glass Speed",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 980,
+        "minHeight": 700,
+        "resizable": true,
+        "transparent": false,
+        "decorations": true,
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
+        "backgroundColor": "#071011"
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Utility",
+    "shortDescription": "Liquid-glass iperf3 desktop speed test",
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="150" y1="90" x2="860" y2="930" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#173635"/>
+      <stop offset="0.52" stop-color="#0A1718"/>
+      <stop offset="1" stop-color="#111A1B"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="238" y1="500" x2="790" y2="500" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#68E8D2"/>
+      <stop offset="0.6" stop-color="#D9FFF7"/>
+      <stop offset="1" stop-color="#82AFF8"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-80%" width="180%" height="260%">
+      <feGaussianBlur stdDeviation="22"/>
+    </filter>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="224" fill="url(#bg)"/>
+  <path d="M174 160C318 64 665 82 858 235" fill="none" stroke="#FFFFFF" stroke-opacity="0.11" stroke-width="24" stroke-linecap="round"/>
+  <path d="M210 604C328 604 337 398 463 398C584 398 595 630 808 506" fill="none" stroke="#69E7D2" stroke-opacity="0.28" stroke-width="62" stroke-linecap="round" filter="url(#glow)"/>
+  <path d="M210 604C328 604 337 398 463 398C584 398 595 630 808 506" fill="none" stroke="url(#wave)" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="210" cy="604" r="34" fill="#D9FFF7"/>
+  <circle cx="808" cy="506" r="34" fill="#82AFF8"/>
+  <path d="M252 744H772" stroke="#FFFFFF" stroke-opacity="0.25" stroke-width="24" stroke-linecap="round"/>
+  <path d="M320 744L358 798H666L704 744" fill="none" stroke="#FFFFFF" stroke-opacity="0.72" stroke-width="22" stroke-linejoin="round"/>
+  <rect x="300" y="222" width="424" height="284" rx="46" fill="#FFFFFF" fill-opacity="0.065" stroke="#FFFFFF" stroke-opacity="0.48" stroke-width="22"/>
+</svg>
