@@ -94,10 +94,12 @@ fn keychain_set(id: &str, password: &str) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
-fn keychain_get(id: &str) -> Option<String> {
+fn keychain_get(id: &str) -> Result<String, String> {
     get_generic_password(KEYCHAIN_SERVICE, id)
-        .ok()
-        .and_then(|password| String::from_utf8(password).ok())
+        .map_err(|error| format!("从 macOS 钥匙串读取密码失败：{error}"))
+        .and_then(|password| {
+            String::from_utf8(password).map_err(|_| "钥匙串中的密码不是有效文本".to_string())
+        })
 }
 
 #[cfg(target_os = "macos")]
@@ -109,18 +111,27 @@ fn list_inner(app: &AppHandle) -> Result<Vec<SavedServer>, String> {
     let records = read_metadata(&metadata_path(app)?)?;
     Ok(records
         .into_iter()
-        .filter_map(|record| {
-            let password = keychain_get(&record.id)?;
-            Some(SavedServer {
+        .map(|record| {
+            SavedServer {
                 id: record.id,
                 host: record.host,
                 ssh_port: record.ssh_port,
                 iperf_port: record.iperf_port,
                 username: record.username,
-                password,
-            })
+                // Passwords are unlocked lazily so launching the app never causes
+                // one Keychain authorization dialog per saved server.
+                password: String::new(),
+            }
         })
         .collect())
+}
+
+fn password_inner(app: &AppHandle, request: DeleteServerRequest) -> Result<String, String> {
+    let records = read_metadata(&metadata_path(app)?)?;
+    if !records.iter().any(|record| record.id == request.id) {
+        return Err("常用服务器不存在".into());
+    }
+    keychain_get(&request.id)
 }
 
 fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer, String> {
@@ -199,6 +210,16 @@ pub async fn save_server(
     tauri::async_runtime::spawn_blocking(move || save_inner(&app, payload))
         .await
         .map_err(|error| format!("保存常用服务器任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub async fn get_saved_server_password(
+    app: AppHandle,
+    payload: DeleteServerRequest,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || password_inner(&app, payload))
+        .await
+        .map_err(|error| format!("读取服务器密码任务失败：{error}"))?
 }
 
 #[tauri::command]

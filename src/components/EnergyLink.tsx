@@ -9,9 +9,8 @@ interface EnergyLinkProps {
   intensity?: number;
 }
 
-const route = "M 2 31 C 31 31, 33 63, 57 63 S 80 31, 98 31";
-const reverseRoute = "M 98 31 C 80 31, 81 63, 57 63 C 33 63, 31 31, 2 31";
-const pulseDelays = [0, -0.38, -0.76, -1.14];
+const route = "M 0 31 C 30 31, 33 63, 57 63 S 83 31, 102 31";
+const reverseRoute = "M 102 31 C 83 31, 81 63, 57 63 C 33 63, 30 31, 0 31";
 
 function EnergyLinkComponent({
   direction,
@@ -22,8 +21,6 @@ function EnergyLinkComponent({
   const forward = direction === "upload";
   const reduceMotion = useReducedMotion();
   const id = useId().replace(/:/g, "");
-  const gradientId = `energy-${id}`;
-  const glowId = `energy-glow-${id}`;
   const plugGlowId = `plug-glow-${id}`;
   const reverseRouteId = `reverse-route-${id}`;
   const energyLevel = Math.min(1.6, Math.max(0.35, intensity));
@@ -36,14 +33,6 @@ function EnergyLinkComponent({
     >
       <svg viewBox="0 0 100 92" preserveAspectRatio="none">
         <defs>
-          <linearGradient id={gradientId} x1={forward ? "0" : "1"} x2={forward ? "1" : "0"}>
-            <stop offset="0%" stopColor={forward ? "#4cd9c3" : "#ff735b"} stopOpacity="0.24" />
-            <stop offset="48%" stopColor={forward ? "#d9fff7" : "#fff0e8"} stopOpacity="0.98" />
-            <stop offset="100%" stopColor={forward ? "#7caef8" : "#ffc55d"} stopOpacity="0.3" />
-          </linearGradient>
-          <filter id={glowId} x="-50%" y="-100%" width="200%" height="300%">
-            <feGaussianBlur stdDeviation="2.2" />
-          </filter>
           <filter id={plugGlowId} x="-180%" y="-180%" width="460%" height="460%">
             <feGaussianBlur stdDeviation="1.5" result="blur" />
             <feMerge>
@@ -54,7 +43,7 @@ function EnergyLinkComponent({
           <path id={reverseRouteId} d={reverseRoute} />
         </defs>
 
-        <path className="energy-rail" d={route} />
+        <path className="energy-rail" d={route} pathLength="1" />
         <motion.path
           className="energy-cable"
           d={reverseRoute}
@@ -63,40 +52,6 @@ function EnergyLinkComponent({
           animate={{ pathLength: engaged ? 1 : 0, opacity: engaged ? 1 : 0.28 }}
           transition={{ pathLength: { duration: 0.72, ease: [0.22, 1, 0.36, 1] }, opacity: { duration: 0.25 } }}
         />
-        <path
-          className="energy-flow-dash"
-          d={route}
-          pathLength="1"
-          stroke={`url(#${gradientId})`}
-        />
-        <path
-          className="energy-flow-glow"
-          d={route}
-          pathLength="1"
-          stroke={`url(#${gradientId})`}
-          filter={`url(#${glowId})`}
-        />
-
-        {pulseDelays.map((delay, index) => (
-          <path
-            key={delay}
-            className={`energy-pulse energy-pulse-${index + 1}`}
-            d={route}
-            pathLength="1"
-            stroke={forward ? "#e5fff9" : "#fff1ea"}
-            style={{ "--packet-delay": `${delay}s` } as CSSProperties}
-          />
-        ))}
-
-        <g className="energy-endpoint endpoint-local">
-          <circle cx="2" cy="31" r="4.8" />
-          <circle cx="2" cy="31" r="1.6" />
-        </g>
-        <g className="energy-endpoint endpoint-remote">
-          <circle cx="98" cy="31" r="4.8" />
-          <circle cx="98" cy="31" r="1.6" />
-        </g>
-
         {engaged && !reduceMotion ? (
           <motion.g
             className="plug-flight"
@@ -123,7 +78,6 @@ function EnergyLinkComponent({
       </svg>
 
       <span className={`energy-direction ${forward ? "forward" : "reverse"}`}>
-        <i />
         {forward ? "↑" : "↓"}
       </span>
     </div>

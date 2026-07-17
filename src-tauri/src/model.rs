@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+pub const STANDARD_DURATION_SECONDS: u16 = 10;
+pub const STANDARD_PARALLEL_STREAMS: u8 = 8;
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TransferDirection {
@@ -52,8 +55,11 @@ impl SpeedTestRequest {
         if self.ssh_port == 0 || self.iperf_port == 0 {
             return Err("端口必须在 1 到 65535 之间".into());
         }
-        if self.test_mode == TestMode::Advanced && !(3..=120).contains(&self.duration_seconds) {
-            return Err("测速时长必须在 3 到 120 秒之间".into());
+        if self.test_mode == TestMode::Advanced
+            && self.duration_seconds != 0
+            && !(3..=120).contains(&self.duration_seconds)
+        {
+            return Err("测速时长必须为 0（持续运行），或在 3 到 120 秒之间".into());
         }
         if self.test_mode == TestMode::Advanced && !(1..=32).contains(&self.parallel_streams) {
             return Err("并发线程必须在 1 到 32 之间".into());
@@ -63,7 +69,7 @@ impl SpeedTestRequest {
 
     pub fn effective_duration(&self) -> u16 {
         if self.test_mode == TestMode::Standard {
-            10
+            STANDARD_DURATION_SECONDS
         } else {
             self.duration_seconds
         }
@@ -71,7 +77,7 @@ impl SpeedTestRequest {
 
     pub fn effective_parallel_streams(&self) -> u8 {
         if self.test_mode == TestMode::Standard {
-            4
+            STANDARD_PARALLEL_STREAMS
         } else {
             self.parallel_streams
         }
@@ -160,8 +166,11 @@ mod tests {
     fn standard_mode_uses_fixed_profile() {
         let request = request(TestMode::Standard);
         assert_eq!(request.effective_protocol(), TransportProtocol::Tcp);
-        assert_eq!(request.effective_parallel_streams(), 4);
-        assert_eq!(request.effective_duration(), 10);
+        assert_eq!(
+            request.effective_parallel_streams(),
+            STANDARD_PARALLEL_STREAMS
+        );
+        assert_eq!(request.effective_duration(), STANDARD_DURATION_SECONDS);
     }
 
     #[test]
@@ -170,5 +179,14 @@ mod tests {
         assert_eq!(request.effective_protocol(), TransportProtocol::Udp);
         assert_eq!(request.effective_parallel_streams(), 12);
         assert_eq!(request.effective_duration(), 45);
+    }
+
+    #[test]
+    fn advanced_mode_allows_continuous_duration() {
+        let mut request = request(TestMode::Advanced);
+        request.duration_seconds = 0;
+
+        assert!(request.validate().is_ok());
+        assert_eq!(request.effective_duration(), 0);
     }
 }

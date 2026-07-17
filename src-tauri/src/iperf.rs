@@ -9,6 +9,8 @@ use tokio::{
     time::{timeout, Duration},
 };
 
+const REPORT_INTERVAL_SECONDS: &str = "0.5";
+
 #[derive(Debug)]
 pub enum RunError {
     Cancelled,
@@ -60,7 +62,7 @@ fn client_args(
         request.iperf_port.to_string(),
         "--json-stream".into(),
         "-i".into(),
-        "1".into(),
+        REPORT_INTERVAL_SECONDS.into(),
         "-t".into(),
         duration_seconds.to_string(),
         "-P".into(),
@@ -193,7 +195,6 @@ pub fn parse_sample(line: &str, direction: TransferDirection) -> Option<SpeedSam
         .or_else(|| interval.get("sum_received"))
         .or_else(|| interval.get("sum_sent"))
         .unwrap_or(interval);
-    let bandwidth_bps = summary.get("bits_per_second")?.as_f64()?;
     let elapsed = summary
         .get("end")
         .and_then(Value::as_f64)
@@ -203,6 +204,27 @@ pub fn parse_sample(line: &str, direction: TransferDirection) -> Option<SpeedSam
         .get("bytes")
         .and_then(Value::as_u64)
         .unwrap_or_default();
+    let reported_bandwidth = summary
+        .get("bits_per_second")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite());
+    let bandwidth_bps = reported_bandwidth
+        .filter(|value| *value > 0.0)
+        .or_else(|| {
+            let seconds = summary.get("seconds").and_then(Value::as_f64)?;
+            (bytes > 0 && seconds > 0.0).then_some(bytes as f64 * 8.0 / seconds)
+        })
+        .or_else(|| {
+            let total = interval
+                .get("streams")
+                .and_then(Value::as_array)?
+                .iter()
+                .filter_map(|stream| stream.get("bits_per_second").and_then(Value::as_f64))
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .sum::<f64>();
+            (total > 0.0).then_some(total)
+        })
+        .or(reported_bandwidth)?;
     let retransmits = summary.get("retransmits").and_then(Value::as_u64);
     let jitter_ms = summary.get("jitter_ms").and_then(Value::as_f64);
     let latency_ms = interval
@@ -270,6 +292,22 @@ mod tests {
     }
 
     #[test]
+    fn recovers_zero_bandwidth_from_interval_bytes() {
+        let line = r#"{"event":"interval","data":{"streams":[],"sum":{"end":1.5,"seconds":0.5,"bytes":50000000,"bits_per_second":0.0}}}"#;
+        let sample = parse_sample(line, TransferDirection::Download).expect("interval sample");
+
+        assert_eq!(sample.bandwidth_bps, 800_000_000.0);
+    }
+
+    #[test]
+    fn recovers_zero_bandwidth_from_parallel_streams() {
+        let line = r#"{"event":"interval","data":{"streams":[{"bits_per_second":310000000.0},{"bits_per_second":290000000.0}],"sum":{"end":1.5,"seconds":0.5,"bytes":0,"bits_per_second":0.0}}}"#;
+        let sample = parse_sample(line, TransferDirection::Upload).expect("interval sample");
+
+        assert_eq!(sample.bandwidth_bps, 600_000_000.0);
+    }
+
+    #[test]
     fn ignores_non_interval_events() {
         let line = r#"{"event":"start","data":{"version":"iperf 3.21"}}"#;
         assert!(parse_sample(line, TransferDirection::Download).is_none());
@@ -304,9 +342,25 @@ mod tests {
         );
 
         assert!(args.windows(2).any(|pair| pair == ["-P", "8"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["-i", REPORT_INTERVAL_SECONDS]));
         assert!(args.windows(2).any(|pair| pair == ["-t", "30"]));
         assert!(args.windows(2).any(|pair| pair == ["-b", "0"]));
         assert!(args.iter().any(|argument| argument == "-u"));
         assert!(args.iter().any(|argument| argument == "-R"));
+    }
+
+    #[test]
+    fn builds_continuous_duration_arguments() {
+        let args = client_args(
+            &request(),
+            TransferDirection::Upload,
+            TransportProtocol::Tcp,
+            4,
+            0,
+        );
+
+        assert!(args.windows(2).any(|pair| pair == ["-t", "0"]));
     }
 }

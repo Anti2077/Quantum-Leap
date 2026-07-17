@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { useId, useMemo } from "react";
-import { formatBandwidth } from "../lib/format";
+import { formatBandwidth, type BandwidthUnit } from "../lib/format";
 
 interface ChartPoint {
   t: number;
@@ -49,7 +49,15 @@ function maximumPoint(points: PlotPoint[]) {
   );
 }
 
-export function ComparisonChart({ upload, download }: { upload: ChartPoint[]; download: ChartPoint[] }) {
+export function ComparisonChart({
+  upload,
+  download,
+  unit
+}: {
+  upload: ChartPoint[];
+  download: ChartPoint[];
+  unit: BandwidthUnit;
+}) {
   const id = useId().replace(/:/g, "");
   const maximum = Math.max(...upload.map((point) => point.bps), ...download.map((point) => point.bps), 1);
   const uploadAverage = average(upload);
@@ -126,10 +134,10 @@ export function ComparisonChart({ upload, download }: { upload: ChartPoint[]; do
         )}
       </svg>
       <span className="average-label upload" style={{ top: `${(uploadAverageY / height) * 100}%` }}>
-        AVG {formatBandwidth(uploadAverage)}
+        AVG {formatBandwidth(uploadAverage, unit)}
       </span>
       <span className="average-label download" style={{ top: `${(downloadAverageY / height) * 100}%` }}>
-        AVG {formatBandwidth(downloadAverage)}
+        AVG {formatBandwidth(downloadAverage, unit)}
       </span>
       {uploadMaximum && (
         <span
@@ -140,7 +148,7 @@ export function ComparisonChart({ upload, download }: { upload: ChartPoint[]; do
             transform: uploadMaximum.x / width > 0.72 ? "translate(-100%, -135%)" : undefined
           }}
         >
-          MAX {formatBandwidth(uploadMaximum.bps)}
+          MAX {formatBandwidth(uploadMaximum.bps, unit)}
         </span>
       )}
       {downloadMaximum && (
@@ -152,7 +160,7 @@ export function ComparisonChart({ upload, download }: { upload: ChartPoint[]; do
             transform: downloadMaximum.x / width > 0.72 ? "translate(-100%, 28%)" : undefined
           }}
         >
-          MAX {formatBandwidth(downloadMaximum.bps)}
+          MAX {formatBandwidth(downloadMaximum.bps, unit)}
         </span>
       )}
     </div>

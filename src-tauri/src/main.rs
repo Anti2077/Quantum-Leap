@@ -321,6 +321,7 @@ fn main() {
             start_speed_test,
             stop_speed_test,
             saved_server::list_saved_servers,
+            saved_server::get_saved_server_password,
             saved_server::save_server,
             saved_server::delete_saved_server
         ])

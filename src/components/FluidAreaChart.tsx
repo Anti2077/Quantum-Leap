@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useId, useMemo, useRef, useState, type PointerEvent } from "react";
-import { formatBandwidth } from "../lib/format";
+import { formatBandwidth, type BandwidthUnit } from "../lib/format";
 import type { TransferDirection } from "../lib/types";
 
 interface ChartPoint {
@@ -16,6 +16,8 @@ interface PlotPoint extends ChartPoint {
 const width = 720;
 const height = 210;
 const baseline = 204;
+const curvePoints = 60;
+const curveTransition = { duration: 0.48, ease: [0.22, 1, 0.36, 1] } as const;
 
 function smoothPath(points: PlotPoint[]) {
   if (points.length < 2) return `M 0 ${baseline} L ${width} ${baseline}`;
@@ -36,10 +38,12 @@ function smoothPath(points: PlotPoint[]) {
 
 export function FluidAreaChart({
   data,
-  direction
+  direction,
+  unit
 }: {
   data: ChartPoint[];
   direction: TransferDirection;
+  unit: BandwidthUnit;
 }) {
   const id = useId().replace(/:/g, "");
   const container = useRef<HTMLDivElement>(null);
@@ -50,12 +54,23 @@ export function FluidAreaChart({
 
   const points = useMemo<PlotPoint[]>(() => {
     const visible = data.slice(-60);
+    if (visible.length === 0) return [];
     const maximum = Math.max(...visible.map((point) => point.bps), 1);
-    return visible.map((point, index) => ({
-      ...point,
-      x: visible.length === 1 ? width : (index / (visible.length - 1)) * width,
-      y: baseline - (point.bps / maximum) * 166
-    }));
+    return Array.from({ length: curvePoints }, (_, index) => {
+      const position = (index / (curvePoints - 1)) * Math.max(0, visible.length - 1);
+      const leftIndex = Math.floor(position);
+      const rightIndex = Math.min(visible.length - 1, leftIndex + 1);
+      const mix = position - leftIndex;
+      const left = visible[leftIndex];
+      const right = visible[rightIndex];
+      const bps = left.bps + (right.bps - left.bps) * mix;
+      return {
+        t: left.t + (right.t - left.t) * mix,
+        bps,
+        x: (index / (curvePoints - 1)) * width,
+        y: baseline - (bps / maximum) * 166
+      };
+    });
   }, [data]);
 
   const line = useMemo(() => smoothPath(points), [points]);
@@ -95,23 +110,19 @@ export function FluidAreaChart({
         {points.length > 0 && (
           <>
             <motion.path
-              key={`area-${points.length}`}
-              d={area}
               fill={`url(#fill-${id})`}
-              initial={{ opacity: 0.5 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.45 }}
+              initial={false}
+              animate={{ d: area, opacity: 1 }}
+              transition={{ d: curveTransition, opacity: { duration: 0.2 } }}
             />
             <motion.path
-              key={`line-${points.length}`}
-              d={line}
               fill="none"
               stroke={`url(#line-${id})`}
               strokeWidth="3"
               strokeLinecap="round"
-              initial={{ opacity: 0.6, pathLength: 0.92 }}
-              animate={{ opacity: 1, pathLength: 1 }}
-              transition={{ duration: 0.46, ease: "easeOut" }}
+              initial={false}
+              animate={{ d: line, opacity: 1 }}
+              transition={{ d: curveTransition, opacity: { duration: 0.2 } }}
             />
             {activePoint && (
               <>
@@ -124,28 +135,24 @@ export function FluidAreaChart({
                   strokeWidth="1"
                   initial={false}
                   animate={{ x1: activePoint.x, x2: activePoint.x }}
+                  transition={hoveredIndex == null ? curveTransition : { duration: 0.08 }}
                 />
                 <motion.circle
-                  cx={activePoint.x}
-                  cy={activePoint.y}
                   r="7"
                   fill={accent}
-                  opacity="0.3"
                   filter={`url(#chart-glow-${id})`}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 0.3 }}
-                  transition={{ duration: 0.2 }}
+                  initial={false}
+                  animate={{ cx: activePoint.x, cy: activePoint.y, opacity: 0.3 }}
+                  transition={hoveredIndex == null ? curveTransition : { duration: 0.08 }}
                 />
                 <motion.circle
-                  cx={activePoint.x}
-                  cy={activePoint.y}
                   r="3"
                   fill={accent}
                   stroke="rgba(255,255,255,.85)"
                   strokeWidth="1"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.2 }}
+                  initial={false}
+                  animate={{ cx: activePoint.x, cy: activePoint.y, opacity: 1 }}
+                  transition={hoveredIndex == null ? curveTransition : { duration: 0.08 }}
                 />
               </>
             )}
@@ -161,7 +168,7 @@ export function FluidAreaChart({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 4 }}
           >
-            <strong>{formatBandwidth(activePoint.bps)}</strong>
+            <strong>{formatBandwidth(activePoint.bps, unit)}</strong>
             <span>{activePoint.t.toFixed(1)}s</span>
           </motion.div>
         )}

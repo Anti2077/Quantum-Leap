@@ -22,12 +22,19 @@ import Waves from "lucide-react/dist/esm/icons/waves.js";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   deleteSavedServer,
+  getSavedServerPassword,
   listSavedServers,
   saveServer,
   startSpeedTest,
   stopSpeedTest
 } from "../lib/api";
-import { formatBandwidth, formatBandwidthParts, formatBytes, formatLatency } from "../lib/format";
+import {
+  formatBandwidth,
+  formatBandwidthParts,
+  formatBytes,
+  formatLatency,
+  type BandwidthUnit
+} from "../lib/format";
 import type {
   SavedServer,
   SpeedPromptEvent,
@@ -78,11 +85,23 @@ const initialForm: ConnectionForm = {
   testMode: "standard",
   direction: "upload",
   protocol: "tcp",
-  parallelStreams: "4",
+  parallelStreams: "8",
   durationSeconds: "10"
 };
 
 const terminalPhases: SpeedStateEvent["phase"][] = ["completed", "cancelled", "failed"];
+const STANDARD_DURATION_SECONDS = 10;
+const STANDARD_PARALLEL_STREAMS = 8;
+const SAMPLE_HISTORY_LIMIT = 280;
+const BANDWIDTH_UNIT_KEY = "pulse.bandwidth-unit";
+
+function savedBandwidthUnit(): BandwidthUnit {
+  try {
+    return localStorage.getItem(BANDWIDTH_UNIT_KEY) === "Gbps" ? "Gbps" : "Mbps";
+  } catch {
+    return "Mbps";
+  }
+}
 
 const phaseLabels: Record<SpeedStateEvent["phase"], string> = {
   idle: "Ready",
@@ -143,9 +162,11 @@ export function SpeedWorkbench() {
   const [savedServers, setSavedServers] = useState<SavedServer[]>([]);
   const [savedMenuOpen, setSavedMenuOpen] = useState(false);
   const [savedBusy, setSavedBusy] = useState(false);
+  const [bandwidthUnit, setBandwidthUnit] = useState<BandwidthUnit>(savedBandwidthUnit);
   const [status, setStatus] = useState<SpeedStateEvent>({ phase: "idle", message: "等待连接服务器" });
   const requestRef = useRef<SpeedTestRequest | null>(null);
   const savedControlRef = useRef<HTMLDivElement>(null);
+  const lastGoodSampleRef = useRef<Partial<Record<TransferDirection, SpeedSample>>>({});
 
   useEffect(() => {
     let mounted = true;
@@ -153,17 +174,28 @@ export function SpeedWorkbench() {
 
     void listen<SpeedSample>("speed://sample", (event) => {
       if (!mounted) return;
-      setLatest(event.payload);
+      const sample = event.payload;
+      const usableRate = Number.isFinite(sample.bandwidthBps) && sample.bandwidthBps > 0;
+      if (!usableRate) {
+        const held =
+          lastGoodSampleRef.current[sample.direction] ??
+          lastGoodSampleRef.current[sample.direction === "upload" ? "download" : "upload"];
+        setLatest(held ? { ...sample, bandwidthBps: held.bandwidthBps } : sample);
+        return;
+      }
+
+      lastGoodSampleRef.current[sample.direction] = sample;
+      setLatest(sample);
       setSamples((current) => [
-        ...current.slice(-119),
+        ...current.slice(-(SAMPLE_HISTORY_LIMIT - 1)),
         {
-          t: event.payload.elapsed,
-          bps: event.payload.bandwidthBps,
-          bytes: event.payload.bytes,
-          retransmits: event.payload.retransmits ?? 0,
-          latencyMs: event.payload.latencyMs ?? null,
-          jitterMs: event.payload.jitterMs ?? null,
-          direction: event.payload.direction
+          t: sample.elapsed,
+          bps: sample.bandwidthBps,
+          bytes: sample.bytes,
+          retransmits: sample.retransmits ?? 0,
+          latencyMs: sample.latencyMs ?? null,
+          jitterMs: sample.jitterMs ?? null,
+          direction: sample.direction
         }
       ]);
     })
@@ -206,6 +238,14 @@ export function SpeedWorkbench() {
   }, []);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(BANDWIDTH_UNIT_KEY, bandwidthUnit);
+    } catch {
+      // The selected unit still applies for this session when storage is unavailable.
+    }
+  }, [bandwidthUnit]);
+
+  useEffect(() => {
     if (!savedMenuOpen && !prompt) return;
     const handlePointerDown = (event: PointerEvent) => {
       if (savedMenuOpen && !savedControlRef.current?.contains(event.target as Node)) {
@@ -234,8 +274,14 @@ export function SpeedWorkbench() {
   const running = status.phase === "running";
   const standard = form.testMode === "standard";
   const completedStandard = standard && status.phase === "completed";
-  const duration = standard ? 10 : Number(form.durationSeconds) || 10;
-  const parallelStreams = standard ? 4 : Number(form.parallelStreams) || 1;
+  const requestedDuration = form.durationSeconds.trim() === "" ? Number.NaN : Number(form.durationSeconds);
+  const duration = standard
+    ? STANDARD_DURATION_SECONDS
+    : Number.isFinite(requestedDuration)
+      ? requestedDuration
+      : 10;
+  const continuous = !standard && duration === 0;
+  const parallelStreams = standard ? STANDARD_PARALLEL_STREAMS : Number(form.parallelStreams) || 1;
   const protocol: TransportProtocol = standard ? "tcp" : form.protocol;
   const activeDirection = standard ? (latest?.direction ?? "upload") : form.direction;
   const activeSamples = useMemo(
@@ -247,11 +293,22 @@ export function SpeedWorkbench() {
   const activeStats = activeDirection === "upload" ? uploadStats : downloadStats;
   const totalBytes = uploadStats.bytes + downloadStats.bytes;
   const displayedBps = completedStandard ? downloadStats.average : (latest?.bandwidthBps ?? 0);
-  const rate = useMemo(() => formatBandwidthParts(displayedBps), [displayedBps]);
+  const rate = useMemo(
+    () => formatBandwidthParts(displayedBps, bandwidthUnit),
+    [bandwidthUnit, displayedBps]
+  );
   const rating = downloadRating(downloadStats.average);
-  const motionIntensity = Math.min(1.6, Math.max(0.35, displayedBps / 1e9));
-  const expectedSamples = duration * (standard ? 2 : 1);
-  const progress = Math.min(100, Math.max(0, (samples.length / expectedSamples) * 100));
+  const motionIntensity = Math.min(1, Math.max(0, displayedBps / 1e9));
+  const elapsed = Math.min(duration, Math.max(0, latest?.elapsed ?? 0));
+  const completedDuration = standard && latest?.direction === "download" ? duration : 0;
+  const progress = continuous
+    ? 0
+    : status.phase === "completed"
+      ? 100
+      : Math.min(
+          100,
+          Math.max(0, ((completedDuration + elapsed) / (duration * (standard ? 2 : 1))) * 100)
+        );
   const valid =
     form.host.trim().length > 0 &&
     form.username.trim().length > 0 &&
@@ -259,23 +316,37 @@ export function SpeedWorkbench() {
     Number(form.sshPort) > 0 &&
     Number(form.iperfPort) > 0 &&
     (standard ||
-      (duration >= 3 && duration <= 120 && parallelStreams >= 1 && parallelStreams <= 32));
+      ((duration === 0 || (duration >= 3 && duration <= 120)) &&
+        parallelStreams >= 1 &&
+        parallelStreams <= 32));
 
   const update = <K extends keyof ConnectionForm>(key: K, value: ConnectionForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
 
-  const selectSavedServer = (server: SavedServer) => {
-    setForm((current) => ({
-      ...current,
-      host: server.host,
-      sshPort: server.sshPort.toString(),
-      iperfPort: server.iperfPort.toString(),
-      username: server.username,
-      password: server.password
-    }));
-    setSavedMenuOpen(false);
-    setStatus({ phase: "idle", message: `已载入 ${server.host}` });
+  const selectSavedServer = async (server: SavedServer) => {
+    if (savedBusy) return;
+    setSavedBusy(true);
+    try {
+      const password = server.password || (await getSavedServerPassword(server.id));
+      setSavedServers((current) =>
+        current.map((saved) => (saved.id === server.id ? { ...saved, password } : saved))
+      );
+      setForm((current) => ({
+        ...current,
+        host: server.host,
+        sshPort: server.sshPort.toString(),
+        iperfPort: server.iperfPort.toString(),
+        username: server.username,
+        password
+      }));
+      setSavedMenuOpen(false);
+      setStatus({ phase: "idle", message: `已载入 ${server.host}` });
+    } catch (error) {
+      setStatus({ phase: "failed", message: errorMessage(error) });
+    } finally {
+      setSavedBusy(false);
+    }
   };
 
   const saveCurrentServer = async () => {
@@ -349,6 +420,7 @@ export function SpeedWorkbench() {
 
     setSamples([]);
     setLatest(null);
+    lastGoodSampleRef.current = {};
     setPrompt(null);
     await launch(request);
   };
@@ -562,8 +634,8 @@ export function SpeedWorkbench() {
                     exit={{ opacity: 0, y: -5 }}
                   >
                     <span><Network size={13} />TCP</span>
-                    <span><Layers3 size={13} />4 并发</span>
-                    <span><Waves size={13} />上传 + 下载</span>
+                    <span><Layers3 size={13} />{STANDARD_PARALLEL_STREAMS} 并发</span>
+                    <span><Waves size={13} />上下行各 {STANDARD_DURATION_SECONDS} 秒</span>
                   </motion.div>
                 ) : (
                   <motion.div
@@ -631,12 +703,12 @@ export function SpeedWorkbench() {
                           <input
                             className="glass-input"
                             type="number"
-                            min="3"
+                            min="0"
                             max="120"
                             value={form.durationSeconds}
                             onChange={(event) => update("durationSeconds", event.target.value)}
                           />
-                          <span>秒</span>
+                          <span>{form.durationSeconds === "0" ? "持续" : "秒"}</span>
                         </div>
                       </label>
                     </div>
@@ -671,7 +743,9 @@ export function SpeedWorkbench() {
             <div className="stage-heading">
               <div>
                 <span className="eyebrow">
-                  {standard ? "Standard · TCP · 4 streams" : `Advanced · ${protocol.toUpperCase()} · ${parallelStreams} streams`}
+                  {standard
+                    ? `Standard · TCP · ${STANDARD_PARALLEL_STREAMS} streams`
+                    : `Advanced · ${protocol.toUpperCase()} · ${parallelStreams} streams`}
                 </span>
                 <h2>
                   {completedStandard
@@ -681,9 +755,24 @@ export function SpeedWorkbench() {
                       : "下行速率"}
                 </h2>
               </div>
-              <div className={`live-indicator ${running ? "active" : ""}`}>
-                <span />
-                {running ? `${Math.round(progress)}%` : completedStandard ? "Result" : "Standby"}
+              <div className="stage-heading-controls">
+                <div className="bandwidth-unit-switch" aria-label="速率单位">
+                  {(["Mbps", "Gbps"] as const).map((unit) => (
+                    <button
+                      type="button"
+                      key={unit}
+                      className={bandwidthUnit === unit ? "selected" : ""}
+                      onClick={() => setBandwidthUnit(unit)}
+                      aria-pressed={bandwidthUnit === unit}
+                    >
+                      {unit}
+                    </button>
+                  ))}
+                </div>
+                <div className={`live-indicator ${running ? "active" : ""}`}>
+                  <span />
+                  {running ? (continuous ? "LIVE" : `${Math.round(progress)}%`) : completedStandard ? "Result" : "Standby"}
+                </div>
               </div>
             </div>
 
@@ -695,8 +784,12 @@ export function SpeedWorkbench() {
                 engaged={busy}
                 intensity={motionIntensity}
               />
+              <DataStreamField
+                active={running || status.phase === "stopping"}
+                direction={activeDirection}
+                intensity={motionIntensity}
+              />
               <div className="remote-node">
-                <DataStreamField active={running} direction={activeDirection} />
                 <div className="remote-header">
                   <div className="server-identity">
                     <span className="server-icon"><Server size={16} aria-hidden="true" /></span>
@@ -723,12 +816,13 @@ export function SpeedWorkbench() {
                   <ComparisonChart
                     upload={samples.filter((sample) => sample.direction === "upload")}
                     download={samples.filter((sample) => sample.direction === "download")}
+                    unit={bandwidthUnit}
                   />
                 ) : (
-                  <FluidAreaChart data={activeSamples} direction={activeDirection} />
+                  <FluidAreaChart data={activeSamples} direction={activeDirection} unit={bandwidthUnit} />
                 )}
-                <div className="test-progress" aria-hidden="true">
-                  <motion.span animate={{ width: `${progress}%` }} transition={{ duration: 0.45, ease: "easeOut" }} />
+                <div className={`test-progress ${continuous && running ? "is-continuous" : ""}`} aria-hidden="true">
+                  <motion.span animate={{ width: `${progress}%` }} transition={{ duration: 0.52, ease: "linear" }} />
                 </div>
               </div>
             </div>
@@ -739,11 +833,11 @@ export function SpeedWorkbench() {
               <>
                 <div className="metric-cell accent-upload">
                   <span>上传平均</span>
-                  <strong>{formatBandwidth(uploadStats.average)}</strong>
+                  <strong>{formatBandwidth(uploadStats.average, bandwidthUnit)}</strong>
                 </div>
                 <div className="metric-cell accent-download">
                   <span>下载平均</span>
-                  <strong>{formatBandwidth(downloadStats.average)}</strong>
+                  <strong>{formatBandwidth(downloadStats.average, bandwidthUnit)}</strong>
                 </div>
                 <div className="metric-cell">
                   <span>总传输</span>
@@ -758,11 +852,11 @@ export function SpeedWorkbench() {
               <>
                 <div className="metric-cell">
                   <span>平均速率</span>
-                  <strong>{formatBandwidth(activeStats.average)}</strong>
+                  <strong>{formatBandwidth(activeStats.average, bandwidthUnit)}</strong>
                 </div>
                 <div className="metric-cell">
                   <span>峰值</span>
-                  <strong>{formatBandwidth(activeStats.peak)}</strong>
+                  <strong>{formatBandwidth(activeStats.peak, bandwidthUnit)}</strong>
                 </div>
                 <div className="metric-cell">
                   <span>已传输</span>
@@ -801,7 +895,9 @@ export function SpeedWorkbench() {
             <span>
               {terminalPhases.includes(status.phase) || status.phase === "idle" || status.phase === "confirming"
                 ? phaseLabels[status.phase]
-                : `${Math.round(progress)}%`}
+                : continuous
+                  ? "LIVE"
+                  : `${Math.round(progress)}%`}
             </span>
           </div>
         </section>
