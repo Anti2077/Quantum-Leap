@@ -116,8 +116,10 @@ pub async fn run_local_client(
     let stdout_task = tauri::async_runtime::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         let mut sample_count = 0_u32;
+        let mut previous_latency_ms = None;
         while let Ok(Some(line)) = lines.next_line().await {
-            if let Some(sample) = parse_sample(&line, direction) {
+            if let Some(mut sample) = parse_sample(&line, direction) {
+                add_tcp_latency_jitter(&mut sample, &mut previous_latency_ms);
                 sample_count += 1;
                 let _ = app_for_output.emit("speed://sample", sample);
             }
@@ -175,6 +177,16 @@ pub async fn run_local_client(
     Ok(())
 }
 
+fn add_tcp_latency_jitter(sample: &mut SpeedSampleEvent, previous_latency_ms: &mut Option<f64>) {
+    let Some(latency_ms) = sample.latency_ms else {
+        return;
+    };
+    if sample.jitter_ms.is_none() {
+        sample.jitter_ms = previous_latency_ms.map(|previous| (latency_ms - previous).abs());
+    }
+    *previous_latency_ms = Some(latency_ms);
+}
+
 pub fn parse_sample(line: &str, direction: TransferDirection) -> Option<SpeedSampleEvent> {
     let root = serde_json::from_str::<Value>(line).ok()?;
     if root
@@ -226,7 +238,20 @@ pub fn parse_sample(line: &str, direction: TransferDirection) -> Option<SpeedSam
         })
         .or(reported_bandwidth)?;
     let retransmits = summary.get("retransmits").and_then(Value::as_u64);
-    let jitter_ms = summary.get("jitter_ms").and_then(Value::as_f64);
+    let jitter_ms = summary
+        .get("jitter_ms")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .or_else(|| {
+            let samples: Vec<f64> = interval
+                .get("streams")
+                .and_then(Value::as_array)?
+                .iter()
+                .filter_map(|stream| stream.get("rttvar").and_then(Value::as_f64))
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .collect();
+            (!samples.is_empty()).then(|| samples.iter().sum::<f64>() / samples.len() as f64)
+        });
     let latency_ms = interval
         .get("streams")
         .and_then(Value::as_array)
@@ -234,16 +259,16 @@ pub fn parse_sample(line: &str, direction: TransferDirection) -> Option<SpeedSam
             let samples: Vec<f64> = streams
                 .iter()
                 .filter_map(|stream| stream.get("rtt").and_then(Value::as_f64))
+                .filter(|value| value.is_finite() && *value > 0.0)
                 .collect();
-            (!samples.is_empty())
-                .then(|| samples.iter().sum::<f64>() / samples.len() as f64 / 1000.0)
+            (!samples.is_empty()).then(|| samples.iter().sum::<f64>() / samples.len() as f64)
         })
         .or_else(|| {
             summary
                 .get("mean_rtt")
                 .or_else(|| summary.get("rtt"))
                 .and_then(Value::as_f64)
-                .map(|microseconds| microseconds / 1000.0)
+                .filter(|milliseconds| milliseconds.is_finite() && *milliseconds > 0.0)
         });
 
     Some(SpeedSampleEvent {
@@ -281,14 +306,15 @@ mod tests {
 
     #[test]
     fn parses_json_stream_interval() {
-        let line = r#"{"event":"interval","data":{"streams":[{"end":1.001,"rtt":742}],"sum":{"end":1.001,"seconds":1.001,"bytes":125000000,"bits_per_second":998500000.0,"retransmits":2,"sender":true}}}"#;
+        let line = r#"{"event":"interval","data":{"streams":[{"end":1.001,"rtt":13,"rttvar":7}],"sum":{"end":1.001,"seconds":1.001,"bytes":125000000,"bits_per_second":998500000.0,"retransmits":2,"sender":true}}}"#;
         let sample = parse_sample(line, TransferDirection::Upload).expect("interval sample");
 
         assert_eq!(sample.elapsed, 1.001);
         assert_eq!(sample.bandwidth_bps, 998_500_000.0);
         assert_eq!(sample.bytes, 125_000_000);
         assert_eq!(sample.retransmits, Some(2));
-        assert_eq!(sample.latency_ms, Some(0.742));
+        assert_eq!(sample.latency_ms, Some(13.0));
+        assert_eq!(sample.jitter_ms, Some(7.0));
     }
 
     #[test]
@@ -305,6 +331,31 @@ mod tests {
         let sample = parse_sample(line, TransferDirection::Upload).expect("interval sample");
 
         assert_eq!(sample.bandwidth_bps, 600_000_000.0);
+    }
+
+    #[test]
+    fn derives_tcp_jitter_from_consecutive_rtt_samples() {
+        let mut previous = None;
+        let mut first = SpeedSampleEvent {
+            elapsed: 0.5,
+            bandwidth_bps: 1.0,
+            bytes: 1,
+            latency_ms: Some(3.2),
+            jitter_ms: None,
+            retransmits: None,
+            direction: TransferDirection::Upload,
+        };
+        let mut second = SpeedSampleEvent {
+            elapsed: 1.0,
+            latency_ms: Some(4.1),
+            ..first.clone()
+        };
+
+        add_tcp_latency_jitter(&mut first, &mut previous);
+        add_tcp_latency_jitter(&mut second, &mut previous);
+
+        assert_eq!(first.jitter_ms, None);
+        assert!((second.jitter_ms.expect("derived jitter") - 0.9).abs() < 1e-9);
     }
 
     #[test]

@@ -22,7 +22,7 @@ export const formatBandwidth = (bps: number, fixedUnit?: BandwidthUnit) => {
 
 export const formatLatency = (ms?: number | null) => {
   if (ms == null || !Number.isFinite(ms)) return "--";
-  return `${ms.toFixed(1)} ms`;
+  return `${Math.max(0, Math.round(ms))} ms`;
 };
 
 export const formatBytes = (bytes: number) => {

@@ -129,8 +129,8 @@ function errorMessage(error: unknown) {
   return "无法启动测速，请检查连接参数";
 }
 
-function summarize(samples: SamplePoint[], direction: TransferDirection) {
-  const selected = samples.filter((sample) => sample.direction === direction);
+function summarize(samples: SamplePoint[], direction?: TransferDirection) {
+  const selected = direction ? samples.filter((sample) => sample.direction === direction) : samples;
   const latency = selected.map((sample) => sample.latencyMs).filter((value): value is number => value != null);
   const jitter = selected.map((sample) => sample.jitterMs).filter((value): value is number => value != null);
   return {
@@ -155,6 +155,13 @@ function downloadRating(bitsPerSecond: number) {
 }
 
 export function SpeedWorkbench() {
+  const animationPreviewDirection = import.meta.env.DEV
+    ? new URLSearchParams(window.location.search).get("animationPreview")
+    : null;
+  const previewDirection: TransferDirection | null =
+    animationPreviewDirection === "upload" || animationPreviewDirection === "download"
+      ? animationPreviewDirection
+      : null;
   const [form, setForm] = useState(initialForm);
   const [samples, setSamples] = useState<SamplePoint[]>([]);
   const [latest, setLatest] = useState<SpeedSample | null>(null);
@@ -270,8 +277,8 @@ export function SpeedWorkbench() {
     };
   }, [prompt, savedMenuOpen]);
 
-  const busy = ["starting", "running", "stopping"].includes(status.phase);
-  const running = status.phase === "running";
+  const busy = previewDirection != null || ["starting", "running", "stopping"].includes(status.phase);
+  const running = previewDirection != null || status.phase === "running";
   const standard = form.testMode === "standard";
   const completedStandard = standard && status.phase === "completed";
   const requestedDuration = form.durationSeconds.trim() === "" ? Number.NaN : Number(form.durationSeconds);
@@ -283,16 +290,21 @@ export function SpeedWorkbench() {
   const continuous = !standard && duration === 0;
   const parallelStreams = standard ? STANDARD_PARALLEL_STREAMS : Number(form.parallelStreams) || 1;
   const protocol: TransportProtocol = standard ? "tcp" : form.protocol;
-  const activeDirection = standard ? (latest?.direction ?? "upload") : form.direction;
+  const activeDirection = previewDirection ?? (standard ? (latest?.direction ?? "upload") : form.direction);
   const activeSamples = useMemo(
     () => samples.filter((sample) => sample.direction === activeDirection),
     [activeDirection, samples]
   );
   const uploadStats = useMemo(() => summarize(samples, "upload"), [samples]);
   const downloadStats = useMemo(() => summarize(samples, "download"), [samples]);
+  const overallStats = useMemo(() => summarize(samples), [samples]);
   const activeStats = activeDirection === "upload" ? uploadStats : downloadStats;
   const totalBytes = uploadStats.bytes + downloadStats.bytes;
-  const displayedBps = completedStandard ? downloadStats.average : (latest?.bandwidthBps ?? 0);
+  const displayedBps = previewDirection
+    ? 1e9
+    : completedStandard
+      ? downloadStats.average
+      : (latest?.bandwidthBps ?? 0);
   const rate = useMemo(
     () => formatBandwidthParts(displayedBps, bandwidthUnit),
     [bandwidthUnit, displayedBps]
@@ -840,12 +852,16 @@ export function SpeedWorkbench() {
                   <strong>{formatBandwidth(downloadStats.average, bandwidthUnit)}</strong>
                 </div>
                 <div className="metric-cell">
-                  <span>总传输</span>
-                  <strong>{formatBytes(totalBytes)}</strong>
+                  <span>平均延迟</span>
+                  <strong>{formatLatency(overallStats.latency)}</strong>
                 </div>
                 <div className="metric-cell">
-                  <span>平均 RTT</span>
-                  <strong>{formatLatency(uploadStats.latency ?? downloadStats.latency)}</strong>
+                  <span>平均抖动</span>
+                  <strong>{formatLatency(overallStats.jitter)}</strong>
+                </div>
+                <div className="metric-cell">
+                  <span>总传输</span>
+                  <strong>{formatBytes(totalBytes)}</strong>
                 </div>
               </>
             ) : (
@@ -859,15 +875,19 @@ export function SpeedWorkbench() {
                   <strong>{formatBandwidth(activeStats.peak, bandwidthUnit)}</strong>
                 </div>
                 <div className="metric-cell">
-                  <span>已传输</span>
-                  <strong>{formatBytes(activeStats.bytes)}</strong>
+                  <span>平均延迟</span>
+                  <strong>{formatLatency(activeStats.latency)}</strong>
                 </div>
                 <div className="metric-cell">
-                  <span>{protocol === "udp" ? "平均 Jitter" : "RTT / 重传"}</span>
+                  <span>平均抖动</span>
+                  <strong>{formatLatency(activeStats.jitter)}</strong>
+                </div>
+                <div className="metric-cell">
+                  <span>{protocol === "tcp" ? "传输 / 重传" : "已传输"}</span>
                   <strong>
-                    {protocol === "udp"
-                      ? formatLatency(activeStats.jitter)
-                      : `${formatLatency(activeStats.latency)} / ${activeStats.retransmits}`}
+                    {protocol === "tcp"
+                      ? `${formatBytes(activeStats.bytes)} / ${activeStats.retransmits}`
+                      : formatBytes(activeStats.bytes)}
                   </strong>
                 </div>
               </>

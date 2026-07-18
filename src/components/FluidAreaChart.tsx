@@ -1,11 +1,13 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useId, useMemo, useRef, useState, type PointerEvent } from "react";
-import { formatBandwidth, type BandwidthUnit } from "../lib/format";
+import { formatBandwidth, formatLatency, type BandwidthUnit } from "../lib/format";
 import type { TransferDirection } from "../lib/types";
 
 interface ChartPoint {
   t: number;
   bps: number;
+  latencyMs?: number | null;
+  jitterMs?: number | null;
 }
 
 interface PlotPoint extends ChartPoint {
@@ -18,6 +20,12 @@ const height = 210;
 const baseline = 204;
 const curvePoints = 60;
 const curveTransition = { duration: 0.48, ease: [0.22, 1, 0.36, 1] } as const;
+
+function interpolateMetric(left: number | null | undefined, right: number | null | undefined, mix: number) {
+  if (left == null) return right ?? null;
+  if (right == null) return left;
+  return left + (right - left) * mix;
+}
 
 function smoothPath(points: PlotPoint[]) {
   if (points.length < 2) return `M 0 ${baseline} L ${width} ${baseline}`;
@@ -67,6 +75,8 @@ export function FluidAreaChart({
       return {
         t: left.t + (right.t - left.t) * mix,
         bps,
+        latencyMs: interpolateMetric(left.latencyMs, right.latencyMs, mix),
+        jitterMs: interpolateMetric(left.jitterMs, right.jitterMs, mix),
         x: (index / (curvePoints - 1)) * width,
         y: baseline - (bps / maximum) * 166
       };
@@ -170,6 +180,11 @@ export function FluidAreaChart({
           >
             <strong>{formatBandwidth(activePoint.bps, unit)}</strong>
             <span>{activePoint.t.toFixed(1)}s</span>
+            {(activePoint.latencyMs != null || activePoint.jitterMs != null) && (
+              <span className="chart-tooltip-quality">
+                延迟 {formatLatency(activePoint.latencyMs)} · 抖动 {formatLatency(activePoint.jitterMs)}
+              </span>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

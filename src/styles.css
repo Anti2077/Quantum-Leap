@@ -1365,7 +1365,7 @@ h2 {
   top: 18px;
   z-index: 4;
   display: flex;
-  min-width: 86px;
+  min-width: 118px;
   flex-direction: column;
   padding: 7px 9px;
   border-radius: 10px;
@@ -1385,6 +1385,12 @@ h2 {
 .chart-tooltip span {
   color: rgba(222, 234, 231, 0.4);
   font-size: 9px;
+}
+
+.chart-tooltip .chart-tooltip-quality {
+  margin-top: 2px;
+  color: rgba(205, 224, 220, 0.58);
+  white-space: nowrap;
 }
 
 .test-progress {
@@ -1419,7 +1425,7 @@ h2 {
 .metrics-strip {
   display: grid;
   min-height: 90px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   overflow: hidden;
   border-radius: 22px;
 }
@@ -1680,6 +1686,10 @@ h2 {
   }
 
   .metric-cell:nth-child(3)::before {
+    display: none;
+  }
+
+  .metric-cell:nth-child(5)::before {
     display: none;
   }
 
