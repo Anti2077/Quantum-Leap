@@ -1,7 +1,9 @@
 [package]
 name = "iperf3_ui"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/Anti2077/Quantum-Leap"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -43,7 +43,7 @@
 
 ## 安装
 
-1. 从 [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest) 下载 `Quantum-Leap_1.0.0_macOS_arm64.dmg`。
+1. 从 [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest) 下载 `Quantum-Leap_1.0.1_macOS_arm64.dmg`。
 2. 打开 DMG，将 **Quantum Leap** 拖入 **Applications**。
 3. 确认本机和远端均可执行 `iperf3 --version`。
 
@@ -98,6 +98,12 @@ npm run tauri:build
 - React 18 + TypeScript：界面与测速状态机
 - Tailwind CSS + Framer Motion：响应式布局和交互动效
 - `ssh2` + macOS Keychain：远端控制与凭证存储
+
+## 开源许可
+
+Copyright (C) 2026 Anti2077
+
+Quantum Leap 以 [GNU General Public License v3.0 only](LICENSE) 发布。你可以将其用于个人或商业用途，也可以查看、修改和分发源码；如果分发原版或修改版，必须继续以 GPLv3 提供对应源码和许可证声明。本软件不提供任何担保，完整条款以 `LICENSE` 为准。
 
 ## 项目结构
 
