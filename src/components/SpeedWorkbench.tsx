@@ -1,4 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AnimatePresence, motion } from "framer-motion";
 import Activity from "lucide-react/dist/esm/icons/activity.js";
 import ArrowDownToLine from "lucide-react/dist/esm/icons/arrow-down-to-line.js";
@@ -19,7 +20,15 @@ import Square from "lucide-react/dist/esm/icons/square.js";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
 import UserRound from "lucide-react/dist/esm/icons/user-round.js";
 import Waves from "lucide-react/dist/esm/icons/waves.js";
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode
+} from "react";
 import {
   deleteSavedServer,
   getSavedServerPassword,
@@ -94,6 +103,24 @@ const STANDARD_DURATION_SECONDS = 10;
 const STANDARD_PARALLEL_STREAMS = 8;
 const SAMPLE_HISTORY_LIMIT = 280;
 const BANDWIDTH_UNIT_KEY = "pulse.bandwidth-unit";
+type DesignPreviewTheme = "air" | "frost" | "crystal";
+
+function designPreviewSamples(): SamplePoint[] {
+  const makeDirection = (direction: TransferDirection, base: number, phase: number) =>
+    Array.from({ length: 24 }, (_, index): SamplePoint => {
+      const bps = base + Math.sin(index * 0.58 + phase) * base * 0.075 + Math.cos(index * 0.23) * base * 0.035;
+      return {
+        t: (index + 1) * 0.5,
+        bps,
+        bytes: Math.round((bps * 0.5) / 8),
+        retransmits: direction === "upload" && index % 11 === 0 ? 1 : 0,
+        latencyMs: 12 + Math.sin(index * 0.42 + phase) * 2,
+        jitterMs: 3 + Math.cos(index * 0.37 + phase) * 0.8,
+        direction
+      };
+    });
+  return [...makeDirection("upload", 1.16e9, 0.2), ...makeDirection("download", 1.08e9, 1.1)];
+}
 
 function savedBandwidthUnit(): BandwidthUnit {
   try {
@@ -149,31 +176,86 @@ function downloadRating(bitsPerSecond: number) {
   const mbps = bitsPerSecond / 1e6;
   if (mbps > 2500) return { key: "legend", label: "你牛大了" };
   if (mbps >= 2000) return { key: "prime", label: "夯" };
-  if (mbps >= 1000) return { key: "elite", label: "人上人" };
+  if (mbps >= 800) return { key: "elite", label: "人上人" };
   if (mbps >= 50) return { key: "npc", label: "NPC" };
   return { key: "slow", label: "拉完了" };
 }
 
 export function SpeedWorkbench() {
-  const animationPreviewDirection = import.meta.env.DEV
-    ? new URLSearchParams(window.location.search).get("animationPreview")
-    : null;
+  const previewParameters = import.meta.env.DEV ? new URLSearchParams(window.location.search) : null;
+  const animationPreviewDirection = previewParameters?.get("animationPreview") ?? null;
+  const requestedDesignTheme = previewParameters?.get("designPreview") ?? null;
+  const designPreviewTheme: DesignPreviewTheme | null =
+    requestedDesignTheme === "air" || requestedDesignTheme === "frost" || requestedDesignTheme === "crystal"
+      ? requestedDesignTheme
+      : null;
+  const resultPreview = designPreviewTheme != null && previewParameters?.get("resultPreview") === "1";
+  const promptPreview = designPreviewTheme != null ? previewParameters?.get("promptPreview") : null;
   const previewDirection: TransferDirection | null =
     animationPreviewDirection === "upload" || animationPreviewDirection === "download"
       ? animationPreviewDirection
-      : null;
-  const [form, setForm] = useState(initialForm);
-  const [samples, setSamples] = useState<SamplePoint[]>([]);
+      : designPreviewTheme && !resultPreview
+        ? "upload"
+        : null;
+  const [form, setForm] = useState<ConnectionForm>(() =>
+    designPreviewTheme
+      ? {
+          ...initialForm,
+          host: "edge.apple-lab.net",
+          username: "root",
+          password: "preview-password"
+        }
+      : initialForm
+  );
+  const [samples, setSamples] = useState<SamplePoint[]>(() =>
+    designPreviewTheme ? designPreviewSamples() : []
+  );
   const [latest, setLatest] = useState<SpeedSample | null>(null);
-  const [prompt, setPrompt] = useState<SpeedPromptEvent | null>(null);
-  const [savedServers, setSavedServers] = useState<SavedServer[]>([]);
+  const [prompt, setPrompt] = useState<SpeedPromptEvent | null>(() =>
+    promptPreview === "existingServer"
+      ? {
+          kind: "existingServer",
+          title: "检测到已有测速服务",
+          message: "目标端口已有服务监听。继续将直接复用它，完成后不会终止该服务。",
+          detail: "aliserver.anti2077.xyz:5201"
+        }
+      : promptPreview === "hostKeyMismatch"
+        ? {
+            kind: "hostKeyMismatch",
+            title: "服务器身份已变化",
+            message: "当前 SSH 主机密钥与已知记录不一致，请确认服务器身份后再继续。",
+            detail: "SHA256:preview-host-key-fingerprint"
+          }
+        : null
+  );
+  const [savedServers, setSavedServers] = useState<SavedServer[]>(() =>
+    designPreviewTheme
+      ? [
+          { id: "preview-1", host: "aliserver.anti2027.cn", sshPort: 22, iperfPort: 5201, username: "root", password: "preview" },
+          { id: "preview-2", host: "192.168.11.1", sshPort: 22, iperfPort: 5201, username: "root", password: "preview" },
+          { id: "preview-3", host: "192.168.10.4", sshPort: 22, iperfPort: 5201, username: "anti", password: "preview" }
+        ]
+      : []
+  );
   const [savedMenuOpen, setSavedMenuOpen] = useState(false);
   const [savedBusy, setSavedBusy] = useState(false);
   const [bandwidthUnit, setBandwidthUnit] = useState<BandwidthUnit>(savedBandwidthUnit);
-  const [status, setStatus] = useState<SpeedStateEvent>({ phase: "idle", message: "等待连接服务器" });
+  const [status, setStatus] = useState<SpeedStateEvent>(() =>
+    designPreviewTheme
+      ? resultPreview
+        ? { phase: "completed", message: "测速完成，远端服务器已关闭" }
+        : { phase: "running", message: "雪白玻璃主题预览" }
+      : { phase: "idle", message: "等待连接服务器" }
+  );
   const requestRef = useRef<SpeedTestRequest | null>(null);
   const savedControlRef = useRef<HTMLDivElement>(null);
   const lastGoodSampleRef = useRef<Partial<Record<TransferDirection, SpeedSample>>>({});
+
+  const startWindowDrag = (event: ReactMouseEvent<HTMLElement>) => {
+    if (event.button !== 0 || (event.target as Element).closest("button, input, select, textarea, a")) return;
+    event.preventDefault();
+    void getCurrentWindow().startDragging().catch(() => undefined);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -300,8 +382,12 @@ export function SpeedWorkbench() {
   const overallStats = useMemo(() => summarize(samples), [samples]);
   const activeStats = activeDirection === "upload" ? uploadStats : downloadStats;
   const totalBytes = uploadStats.bytes + downloadStats.bytes;
-  const displayedBps = previewDirection
-    ? 1e9
+  const displayedBps = designPreviewTheme
+    ? resultPreview
+      ? downloadStats.average
+      : 1.18e9
+    : previewDirection
+      ? 1e9
     : completedStandard
       ? downloadStats.average
       : (latest?.bandwidthBps ?? 0);
@@ -313,14 +399,16 @@ export function SpeedWorkbench() {
   const motionIntensity = Math.min(1, Math.max(0, displayedBps / 1e9));
   const elapsed = Math.min(duration, Math.max(0, latest?.elapsed ?? 0));
   const completedDuration = standard && latest?.direction === "download" ? duration : 0;
-  const progress = continuous
-    ? 0
-    : status.phase === "completed"
-      ? 100
-      : Math.min(
-          100,
-          Math.max(0, ((completedDuration + elapsed) / (duration * (standard ? 2 : 1))) * 100)
-        );
+  const progress = designPreviewTheme
+    ? 62
+    : continuous
+      ? 0
+      : status.phase === "completed"
+        ? 100
+        : Math.min(
+            100,
+            Math.max(0, ((completedDuration + elapsed) / (duration * (standard ? 2 : 1))) * 100)
+          );
   const valid =
     form.host.trim().length > 0 &&
     form.username.trim().length > 0 &&
@@ -469,10 +557,11 @@ export function SpeedWorkbench() {
       <div className="ambient-plane ambient-plane-top" />
       <div className="ambient-plane ambient-plane-bottom" />
 
-      <header className="titlebar" data-tauri-drag-region>
+      <header className="titlebar" data-tauri-drag-region onMouseDown={startWindowDrag}>
         <div className="brand-mark" data-tauri-drag-region>
           <Activity size={15} aria-hidden="true" />
-          <span>Pulse</span>
+          <span>Quantum Leap</span>
+          <small>跃迁</small>
         </div>
         <div className={`titlebar-state phase-${status.phase}`} data-tauri-drag-region>
           <span />
@@ -852,11 +941,11 @@ export function SpeedWorkbench() {
                   <strong>{formatBandwidth(downloadStats.average, bandwidthUnit)}</strong>
                 </div>
                 <div className="metric-cell">
-                  <span>平均延迟</span>
+                  <span>负载延迟</span>
                   <strong>{formatLatency(overallStats.latency)}</strong>
                 </div>
                 <div className="metric-cell">
-                  <span>平均抖动</span>
+                  <span>RTT 波动</span>
                   <strong>{formatLatency(overallStats.jitter)}</strong>
                 </div>
                 <div className="metric-cell">
@@ -875,11 +964,11 @@ export function SpeedWorkbench() {
                   <strong>{formatBandwidth(activeStats.peak, bandwidthUnit)}</strong>
                 </div>
                 <div className="metric-cell">
-                  <span>平均延迟</span>
+                  <span>负载延迟</span>
                   <strong>{formatLatency(activeStats.latency)}</strong>
                 </div>
                 <div className="metric-cell">
-                  <span>平均抖动</span>
+                  <span>{protocol === "udp" ? "UDP 抖动" : "RTT 波动"}</span>
                   <strong>{formatLatency(activeStats.jitter)}</strong>
                 </div>
                 <div className="metric-cell">

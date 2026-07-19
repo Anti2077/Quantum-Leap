@@ -57,8 +57,8 @@ export function FluidAreaChart({
   const container = useRef<HTMLDivElement>(null);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const upload = direction === "upload";
-  const accent = upload ? "#62e6d1" : "#ff8066";
-  const accentEnd = upload ? "#81aef7" : "#f6b84a";
+  const accent = upload ? "var(--chart-upload, #62e6d1)" : "var(--chart-download, #ff8066)";
+  const accentEnd = upload ? "var(--chart-upload-end, #81aef7)" : "var(--chart-download-end, #f6b84a)";
 
   const points = useMemo<PlotPoint[]>(() => {
     const visible = data.slice(-60);

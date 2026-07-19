@@ -119,6 +119,12 @@ input:focus-visible {
   font-weight: 650;
 }
 
+.brand-mark small {
+  color: rgba(244, 248, 247, 0.42);
+  font-size: 10px;
+  font-weight: 560;
+}
+
 .brand-mark svg {
   color: #6ce5d1;
 }
@@ -1224,6 +1230,7 @@ h2 {
   height: 185px;
   min-height: 150px;
   margin-top: -2px;
+  cursor: crosshair;
 }
 
 .comparison-chart > svg {
@@ -1231,6 +1238,30 @@ h2 {
   width: 100%;
   height: 100%;
   overflow: visible;
+}
+
+.comparison-hover-line {
+  stroke: rgba(228, 240, 237, 0.18);
+  stroke-width: 1;
+  stroke-dasharray: 4 5;
+  pointer-events: none;
+}
+
+.comparison-tooltip {
+  top: 7px;
+  gap: 2px;
+}
+
+.comparison-tooltip strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.comparison-tooltip-upload {
+  color: #62e6d1;
+}
+
+.comparison-tooltip-download {
+  color: #ff947c;
 }
 
 .comparison-legend {

@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"","local":true,"windows":["main"],"permissions":["core:default","core:event:default"]}}
+{"default":{"identifier":"default","description":"","local":true,"windows":["main"],"permissions":["core:default","core:event:default","core:window:allow-start-dragging"]}}

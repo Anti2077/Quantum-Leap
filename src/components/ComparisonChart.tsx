@@ -1,5 +1,5 @@
-import { motion } from "framer-motion";
-import { useId, useMemo } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { useId, useMemo, useRef, useState, type PointerEvent } from "react";
 import { formatBandwidth, type BandwidthUnit } from "../lib/format";
 
 interface ChartPoint {
@@ -59,6 +59,8 @@ export function ComparisonChart({
   unit: BandwidthUnit;
 }) {
   const id = useId().replace(/:/g, "");
+  const container = useRef<HTMLDivElement>(null);
+  const [hoverRatio, setHoverRatio] = useState<number | null>(null);
   const maximum = Math.max(...upload.map((point) => point.bps), ...download.map((point) => point.bps), 1);
   const uploadAverage = average(upload);
   const downloadAverage = average(download);
@@ -68,9 +70,29 @@ export function ComparisonChart({
   const downloadMaximum = maximumPoint(downloadPoints);
   const uploadAverageY = baseline - (uploadAverage / maximum) * (baseline - top);
   const downloadAverageY = baseline - (downloadAverage / maximum) * (baseline - top);
+  const hoveredUpload =
+    hoverRatio == null || uploadPoints.length === 0
+      ? null
+      : uploadPoints[Math.round(hoverRatio * (uploadPoints.length - 1))];
+  const hoveredDownload =
+    hoverRatio == null || downloadPoints.length === 0
+      ? null
+      : downloadPoints[Math.round(hoverRatio * (downloadPoints.length - 1))];
+  const hoveredTime = Math.max(hoveredUpload?.t ?? 0, hoveredDownload?.t ?? 0);
+
+  const movePointer = (event: PointerEvent<HTMLDivElement>) => {
+    if (!container.current || (uploadPoints.length === 0 && downloadPoints.length === 0)) return;
+    const bounds = container.current.getBoundingClientRect();
+    setHoverRatio(Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)));
+  };
 
   return (
-    <div className="comparison-chart">
+    <div
+      ref={container}
+      className="comparison-chart"
+      onPointerMove={movePointer}
+      onPointerLeave={() => setHoverRatio(null)}
+    >
       <div className="comparison-legend">
         <span className="upload"><i />上传</span>
         <span className="download"><i />下载</span>
@@ -87,7 +109,7 @@ export function ComparisonChart({
           x2={width}
           y1={uploadAverageY}
           y2={uploadAverageY}
-          stroke="#62e6d1"
+          stroke="var(--chart-upload, #62e6d1)"
           strokeOpacity="0.42"
           strokeDasharray="9 9"
           initial={{ pathLength: 0 }}
@@ -98,7 +120,7 @@ export function ComparisonChart({
           x2={width}
           y1={downloadAverageY}
           y2={downloadAverageY}
-          stroke="#ff8066"
+          stroke="var(--chart-download, #ff8066)"
           strokeOpacity="0.42"
           strokeDasharray="9 9"
           initial={{ pathLength: 0 }}
@@ -107,7 +129,7 @@ export function ComparisonChart({
         <motion.path
           d={smoothPath(uploadPoints)}
           fill="none"
-          stroke="#62e6d1"
+          stroke="var(--chart-upload, #62e6d1)"
           strokeWidth="3"
           strokeLinecap="round"
           initial={{ pathLength: 0, opacity: 0 }}
@@ -117,20 +139,55 @@ export function ComparisonChart({
         <motion.path
           d={smoothPath(downloadPoints)}
           fill="none"
-          stroke="#ff8066"
+          stroke="var(--chart-download, #ff8066)"
           strokeWidth="3"
           strokeLinecap="round"
           initial={{ pathLength: 0, opacity: 0 }}
           animate={{ pathLength: 1, opacity: 0.94 }}
           transition={{ duration: 0.9, delay: 0.12, ease: "easeOut" }}
         />
-        {[{ point: uploadMaximum, color: "#62e6d1" }, { point: downloadMaximum, color: "#ff8066" }].map(
+        {[
+          { point: uploadMaximum, color: "var(--chart-upload, #62e6d1)" },
+          { point: downloadMaximum, color: "var(--chart-download, #ff8066)" }
+        ].map(
           ({ point, color }) => point && (
             <g key={color}>
               <circle cx={point.x} cy={point.y} r="9" fill={color} opacity="0.3" filter={`url(#result-glow-${id})`} />
               <circle cx={point.x} cy={point.y} r="4" fill={color} stroke="white" strokeOpacity="0.8" strokeWidth="1.2" />
             </g>
           )
+        )}
+        {hoverRatio != null && (
+          <>
+            <line
+              x1={hoverRatio * width}
+              x2={hoverRatio * width}
+              y1={top}
+              y2={baseline}
+              className="comparison-hover-line"
+            />
+            {[hoveredUpload, hoveredDownload].map(
+              (point, index) => point && (
+                <g key={index}>
+                  <circle
+                    cx={point.x}
+                    cy={point.y}
+                    r="7"
+                    fill={index === 0 ? "var(--chart-upload, #62e6d1)" : "var(--chart-download, #ff8066)"}
+                    opacity="0.18"
+                  />
+                  <circle
+                    cx={point.x}
+                    cy={point.y}
+                    r="3.4"
+                    fill={index === 0 ? "var(--chart-upload, #62e6d1)" : "var(--chart-download, #ff8066)"}
+                    stroke="white"
+                    strokeWidth="1.2"
+                  />
+                </g>
+              )
+            )}
+          </>
         )}
       </svg>
       <span className="average-label upload" style={{ top: `${(uploadAverageY / height) * 100}%` }}>
@@ -163,6 +220,29 @@ export function ComparisonChart({
           MAX {formatBandwidth(downloadMaximum.bps, unit)}
         </span>
       )}
+      <AnimatePresence>
+        {hoverRatio != null && (hoveredUpload || hoveredDownload) && (
+          <motion.div
+            className="chart-tooltip comparison-tooltip"
+            style={{ left: `${Math.min(88, Math.max(12, hoverRatio * 100))}%` }}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+          >
+            {hoveredUpload && (
+              <strong className="comparison-tooltip-upload">
+                上传 {formatBandwidth(hoveredUpload.bps, unit)}
+              </strong>
+            )}
+            {hoveredDownload && (
+              <strong className="comparison-tooltip-download">
+                下载 {formatBandwidth(hoveredDownload.bps, unit)}
+              </strong>
+            )}
+            <span>{hoveredTime.toFixed(1)}s</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

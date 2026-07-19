@@ -1,15 +1,30 @@
 use crate::model::{SpeedSampleEvent, SpeedTestRequest, TransferDirection, TransportProtocol};
 use serde_json::Value;
-use std::{env, path::PathBuf, process::Stdio};
-use tauri::{AppHandle, Emitter};
+use std::{env, path::PathBuf, process::Stdio, sync::Arc, time::Instant};
+use tauri::{async_runtime::JoinHandle, AppHandle, Emitter};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
-    process::Command,
-    sync::watch,
+    process::{Child, Command},
+    sync::{watch, Mutex},
     time::{timeout, Duration},
 };
 
 const REPORT_INTERVAL_SECONDS: &str = "0.5";
+
+#[derive(Default)]
+struct PingMetrics {
+    latency_ms: Option<f64>,
+    jitter_ms: Option<f64>,
+    updated_at: Option<Instant>,
+}
+
+impl PingMetrics {
+    fn fresh_values(&self) -> Option<(f64, Option<f64>)> {
+        self.updated_at
+            .filter(|updated| updated.elapsed() <= Duration::from_secs(2))
+            .and_then(|_| self.latency_ms.map(|latency| (latency, self.jitter_ms)))
+    }
+}
 
 #[derive(Debug)]
 pub enum RunError {
@@ -45,6 +60,75 @@ async fn wait_for_cancel(cancel: &mut watch::Receiver<bool>) {
         if *cancel.borrow() {
             return;
         }
+    }
+}
+
+fn parse_ping_latency(line: &str) -> Option<f64> {
+    let (marker, offset) = if let Some(index) = line.find("time=") {
+        (index, 5)
+    } else if let Some(index) = line.find("time<") {
+        (index, 5)
+    } else {
+        return None;
+    };
+    let value = line[marker + offset..]
+        .trim_start()
+        .chars()
+        .take_while(|character| character.is_ascii_digit() || *character == '.')
+        .collect::<String>()
+        .parse::<f64>()
+        .ok()?;
+    (value.is_finite() && value >= 0.0).then_some(value)
+}
+
+fn spawn_ping(host: &str, metrics: Arc<Mutex<PingMetrics>>) -> Option<(Child, JoinHandle<()>)> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("/sbin/ping");
+        command.args(["-n", "-i", REPORT_INTERVAL_SECONDS, host]);
+        command
+    };
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut command = Command::new("ping");
+        command.args(["-n", "-i", REPORT_INTERVAL_SECONDS, host]);
+        command
+    };
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("ping");
+        command.args(["-t", host]);
+        command
+    };
+
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let mut child = command.spawn().ok()?;
+    let stdout = child.stdout.take()?;
+    let task = tauri::async_runtime::spawn(async move {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let Some(latency_ms) = parse_ping_latency(&line) else {
+                continue;
+            };
+            let mut current = metrics.lock().await;
+            current.jitter_ms = current
+                .latency_ms
+                .map(|previous| (latency_ms - previous).abs());
+            current.latency_ms = Some(latency_ms);
+            current.updated_at = Some(Instant::now());
+        }
+    });
+    Some((child, task))
+}
+
+async fn stop_ping(process: &mut Option<(Child, JoinHandle<()>)>) {
+    if let Some((mut child, task)) = process.take() {
+        let _ = child.start_kill();
+        let _ = timeout(Duration::from_secs(1), child.wait()).await;
+        task.abort();
     }
 }
 
@@ -112,6 +196,9 @@ pub async fn run_local_client(
         .take()
         .ok_or_else(|| RunError::Message("无法读取 iperf3 错误输出".into()))?;
 
+    let ping_metrics = Arc::new(Mutex::new(PingMetrics::default()));
+    let mut ping_process = spawn_ping(request.host.trim(), ping_metrics.clone());
+
     let app_for_output = app.clone();
     let stdout_task = tauri::async_runtime::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
@@ -119,6 +206,12 @@ pub async fn run_local_client(
         let mut previous_latency_ms = None;
         while let Ok(Some(line)) = lines.next_line().await {
             if let Some(mut sample) = parse_sample(&line, direction) {
+                if let Some((latency_ms, jitter_ms)) = ping_metrics.lock().await.fresh_values() {
+                    sample.latency_ms = Some(latency_ms);
+                    if protocol == TransportProtocol::Tcp {
+                        sample.jitter_ms = jitter_ms;
+                    }
+                }
                 add_tcp_latency_jitter(&mut sample, &mut previous_latency_ms);
                 sample_count += 1;
                 let _ = app_for_output.emit("speed://sample", sample);
@@ -152,12 +245,14 @@ pub async fn run_local_client(
                     format!("iperf3 测速失败：{detail}")
                 };
                 let _ = stdout_task.await;
+                stop_ping(&mut ping_process).await;
                 return Err(RunError::Message(message));
             }
             false
         }
     };
 
+    stop_ping(&mut ping_process).await;
     let sample_count = stdout_task.await.unwrap_or_default();
     if cancelled {
         let _ = stderr_task.await;
@@ -315,6 +410,19 @@ mod tests {
         assert_eq!(sample.retransmits, Some(2));
         assert_eq!(sample.latency_ms, Some(13.0));
         assert_eq!(sample.jitter_ms, Some(7.0));
+    }
+
+    #[test]
+    fn parses_macos_and_linux_ping_latency() {
+        assert_eq!(
+            parse_ping_latency("64 bytes from 192.168.11.1: icmp_seq=3 ttl=64 time=6.276 ms"),
+            Some(6.276)
+        );
+        assert_eq!(
+            parse_ping_latency("64 bytes from 127.0.0.1: icmp_seq=0 ttl=64 time<1 ms"),
+            Some(1.0)
+        );
+        assert_eq!(parse_ping_latency("Request timeout for icmp_seq 4"), None);
     }
 
     #[test]

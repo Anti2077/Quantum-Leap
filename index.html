@@ -1,13 +1,32 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-preview-theme="frost">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>iperf3 Glass Speed</title>
+    <script>
+      (() => {
+        let saved = null;
+        try {
+          saved = localStorage.getItem("quantum-leap.theme-mode");
+        } catch {
+          // System theme remains available when storage is restricted.
+        }
+        const mode = saved === "light" || saved === "dark" ? saved : "auto";
+        const resolved =
+          mode === "auto" && matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : mode === "dark"
+              ? "dark"
+              : "light";
+        document.documentElement.dataset.themeMode = mode;
+        document.documentElement.dataset.colorTheme = resolved;
+        document.documentElement.style.colorScheme = resolved;
+      })();
+    </script>
+    <title>Quantum Leap (跃迁)</title>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
- </html>
-
+</html>

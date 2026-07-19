@@ -4,5 +4,6 @@ dist/
 src-tauri/target/
 DerivedData/
 macOSApp/.build/
+iperf3GlassSpeed/
 *.xcuserstate
 xcuserdata/

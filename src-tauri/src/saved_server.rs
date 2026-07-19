@@ -11,7 +11,7 @@ use security_framework::passwords::{
     delete_generic_password, get_generic_password, set_generic_password,
 };
 
-const KEYCHAIN_SERVICE: &str = "com.codex.iperf3ui.saved-server";
+const KEYCHAIN_SERVICE: &str = "com.anti2077.quantumleap.saved-server";
 const METADATA_FILE: &str = "saved-servers.json";
 
 #[derive(Clone, Deserialize)]
