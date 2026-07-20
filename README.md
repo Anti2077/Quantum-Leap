@@ -25,6 +25,7 @@
 
 - 支持 SSH 自动管理与直连已有 `iperf3` 服务两种连接模式
 - SSH 支持密码和私钥认证，私钥可使用可选口令
+- 常用服务器支持 48 字符以内备注，旧版本配置自动兼容
 - 自动识别远端常见包管理器，提供可复制的 `iperf3` 安装命令和重新检测
 - 服务不可达时显示目标地址与端口，区分直连服务和 SSH 管理模式
 - 只清理由当前会话启动且匹配 PID/端口的远端 `iperf3` 进程
@@ -48,11 +49,13 @@
 
 ## 安装
 
-1. 从 [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest) 下载 `Quantum-Leap_1.1.0_macOS_arm64.dmg`。
+1. 从 [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest) 下载 `Quantum-Leap_1.1.1_macOS_arm64.dmg`。
 2. 打开 DMG，将 **Quantum Leap** 拖入 **Applications**。
 3. 确认本机和远端均可执行 `iperf3 --version`。
 
 当前版本使用 ad-hoc 签名，未经过 Apple Developer ID 公证。macOS 首次启动若阻止运行，请在 Finder 中右键应用并选择“打开”，或前往“系统设置 → 隐私与安全性”确认打开。发布页同时提供 SHA-256 校验文件。
+
+DMG 使用 Quantum Leap 专用背景图和拖拽布局，打开镜像后可直接将应用拖入 Applications。
 
 ## 使用方式
 
