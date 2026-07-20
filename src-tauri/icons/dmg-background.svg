@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="520" viewBox="0 0 880 520">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f5f9fb"/>
+      <stop offset="0.52" stop-color="#edf5f7"/>
+      <stop offset="1" stop-color="#f7f9fd"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="55%">
+      <stop offset="0" stop-color="#49d5c2" stop-opacity="0.17"/>
+      <stop offset="0.55" stop-color="#4b8ed0" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#f7f9fd" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="cable" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#86f3de"/>
+      <stop offset="0.45" stop-color="#65d9f5"/>
+      <stop offset="0.72" stop-color="#8b9dff"/>
+      <stop offset="1" stop-color="#68e6d5"/>
+    </linearGradient>
+    <linearGradient id="cableSoft" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#55e4cc" stop-opacity="0.1"/>
+      <stop offset="0.5" stop-color="#64d7f5" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#6f90ff" stop-opacity="0.1"/>
+    </linearGradient>
+    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse">
+      <path d="M 44 0 L 0 0 0 44" fill="none" stroke="#537486" stroke-opacity="0.1" stroke-width="1"/>
+      <circle cx="0" cy="0" r="1.15" fill="#527487" fill-opacity="0.13"/>
+    </pattern>
+    <filter id="blur24" x="-30%" y="-100%" width="160%" height="300%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <filter id="blur8" x="-30%" y="-100%" width="160%" height="300%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+    <filter id="glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2.6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="880" height="520" fill="url(#bg)"/>
+  <rect width="880" height="520" fill="url(#halo)"/>
+  <rect width="880" height="520" fill="url(#grid)"/>
+
+  <path d="M0 118 H880" stroke="#62bbae" stroke-opacity="0.12"/>
+  <path d="M0 402 H880" stroke="#6e8eff" stroke-opacity="0.09"/>
+  <path d="M0 70 C190 20 290 58 440 48 S700 24 880 76" fill="none" stroke="#65bcb0" stroke-opacity="0.12" stroke-width="2"/>
+  <path d="M0 466 C180 420 286 468 440 454 S700 426 880 468" fill="none" stroke="#7398d8" stroke-opacity="0.1" stroke-width="2"/>
+
+  <g opacity="0.62" filter="url(#blur24)">
+    <path d="M274 260 C326 168 372 168 440 260 S554 352 606 260" fill="none" stroke="#41d9cb" stroke-width="18"/>
+  </g>
+  <g opacity="0.78" filter="url(#blur8)">
+    <path d="M274 260 C326 168 372 168 440 260 S554 352 606 260" fill="none" stroke="#6acff2" stroke-width="10"/>
+  </g>
+
+  <path d="M274 260 C326 168 372 168 440 260 S554 352 606 260" fill="none" stroke="#ffffff" stroke-opacity="0.82" stroke-width="14" stroke-linecap="round"/>
+  <path d="M274 260 C326 168 372 168 440 260 S554 352 606 260" fill="none" stroke="url(#cable)" stroke-width="4.6" stroke-linecap="round"/>
+  <path d="M274 260 C326 168 372 168 440 260 S554 352 606 260" fill="none" stroke="#f5ffff" stroke-opacity="0.62" stroke-width="1.25" stroke-linecap="round"/>
+
+  <g fill="none" stroke-linecap="round">
+    <path d="M274 260 C326 168 372 168 440 260" stroke="#2dbfae" stroke-opacity="0.7" stroke-width="1.8" stroke-dasharray="2 11"/>
+    <path d="M440 260 C508 352 554 352 606 260" stroke="#667be8" stroke-opacity="0.7" stroke-width="1.8" stroke-dasharray="2 11"/>
+  </g>
+
+  <g fill="#237f95" filter="url(#glow)">
+    <circle cx="297" cy="223" r="2.2"/>
+    <circle cx="336" cy="184" r="1.5" fill="#2bbda9"/>
+    <circle cx="379" cy="194" r="2.4" fill="#2994a8"/>
+    <circle cx="423" cy="242" r="1.4" fill="#3b9fd6"/>
+    <circle cx="460" cy="284" r="2" fill="#328ebc"/>
+    <circle cx="504" cy="329" r="1.5" fill="#4b8ed0"/>
+    <circle cx="552" cy="327" r="2.3" fill="#667be8"/>
+    <circle cx="586" cy="287" r="1.4" fill="#3b9fb0"/>
+  </g>
+
+  <g fill="#3c9fc2" opacity="0.88">
+    <circle cx="281" cy="247" r="1.05"/><circle cx="287" cy="234" r="0.9"/>
+    <circle cx="302" cy="214" r="0.85"/><circle cx="309" cy="201" r="1.1"/>
+    <circle cx="320" cy="190" r="0.8"/><circle cx="329" cy="181" r="0.95"/>
+    <circle cx="346" cy="173" r="0.85"/><circle cx="359" cy="177" r="1.05"/>
+    <circle cx="369" cy="184" r="0.8"/><circle cx="389" cy="204" r="0.9"/>
+    <circle cx="400" cy="216" r="1.1"/><circle cx="410" cy="229" r="0.8"/>
+    <circle cx="432" cy="251" r="0.9"/><circle cx="447" cy="269" r="1.05"/>
+    <circle cx="468" cy="292" r="0.85"/><circle cx="480" cy="306" r="1.1"/>
+    <circle cx="492" cy="319" r="0.8"/><circle cx="516" cy="334" r="0.9"/>
+    <circle cx="530" cy="338" r="1.05"/><circle cx="542" cy="335" r="0.8"/>
+    <circle cx="562" cy="326" r="1.1"/><circle cx="573" cy="314" r="0.85"/>
+    <circle cx="582" cy="298" r="0.9"/><circle cx="595" cy="277" r="1.05"/>
+  </g>
+
+  <g fill="none" stroke="#8fcfe2" stroke-opacity="0.7" stroke-width="1.15" stroke-linecap="round">
+    <path d="M282 242 l9 -4"/><path d="M298 215 l10 -6"/><path d="M313 194 l8 -4"/>
+    <path d="M348 178 l9 1"/><path d="M388 199 l9 7"/><path d="M405 219 l8 9"/>
+    <path d="M466 286 l8 8"/><path d="M486 312 l9 7"/><path d="M513 331 l10 5"/>
+    <path d="M558 322 l9 -8"/><path d="M579 296 l8 -10"/>
+  </g>
+
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.95">
+    <circle cx="297" cy="223" r="5" stroke-width="0.9"/>
+    <circle cx="379" cy="194" r="5.5" stroke-width="0.9"/>
+    <circle cx="460" cy="284" r="5" stroke-width="0.9"/>
+    <circle cx="552" cy="327" r="5.5" stroke-width="0.9"/>
+  </g>
+
+  <g fill="none" stroke-linecap="round">
+    <path d="M261 260 H278" stroke="#52727c" stroke-opacity="0.5" stroke-width="5"/>
+    <path d="M602 260 H619" stroke="#52727c" stroke-opacity="0.5" stroke-width="5"/>
+    <path d="M261 260 H278" stroke="#73e6d4" stroke-width="2"/>
+    <path d="M602 260 H619" stroke="#87a9ff" stroke-width="2"/>
+  </g>
+
+  <g fill="#337b87" opacity="0.55">
+    <circle cx="236" cy="260" r="2"/>
+    <circle cx="644" cy="260" r="2"/>
+  </g>
+
+  <text x="440" y="438" text-anchor="middle" fill="#24434b" fill-opacity="0.54" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="600" letter-spacing="2.8">DROP TO CONNECT</text>
+  <text x="440" y="458" text-anchor="middle" fill="#537078" fill-opacity="0.52" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="9" letter-spacing="1.7">QUANTUM LEAP · NETWORK TESTING</text>
+</svg>

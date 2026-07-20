@@ -14,7 +14,7 @@
       {
         "title": "Quantum Leap (跃迁)",
         "width": 1280,
-        "height": 820,
+        "height": 825,
         "minWidth": 980,
         "minHeight": 700,
         "resizable": true,
@@ -46,7 +46,22 @@
     "longDescription": "Quantum Leap manages remote iperf3 sessions over SSH and visualizes live TCP and UDP network performance on macOS.",
     "macOS": {
       "minimumSystemVersion": "13.0",
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "dmg": {
+        "background": "icons/dmg-background.png",
+        "windowSize": {
+          "width": 880,
+          "height": 520
+        },
+        "appPosition": {
+          "x": 220,
+          "y": 260
+        },
+        "applicationFolderPosition": {
+          "x": 660,
+          "y": 260
+        }
+      }
     }
   }
 }

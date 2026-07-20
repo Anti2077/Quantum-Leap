@@ -26,6 +26,7 @@ import Square from "lucide-react/dist/esm/icons/square.js";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
 import UserRound from "lucide-react/dist/esm/icons/user-round.js";
 import Waves from "lucide-react/dist/esm/icons/waves.js";
+import X from "lucide-react/dist/esm/icons/x.js";
 import {
   useEffect,
   useMemo,
@@ -261,13 +262,15 @@ export function SpeedWorkbench() {
   const [savedServers, setSavedServers] = useState<SavedServer[]>(() =>
     designPreviewTheme
       ? [
-          { id: "preview-1", host: "aliserver.anti2027.cn", sshPort: 22, iperfPort: 5201, serverMode: "sshManaged", username: "root", password: "preview", authMethod: "password", privateKeyPath: "" },
-          { id: "preview-2", host: "192.168.11.1", sshPort: 22, iperfPort: 5201, serverMode: "existing", username: "", password: "", authMethod: "password", privateKeyPath: "" },
-          { id: "preview-3", host: "192.168.10.4", sshPort: 22, iperfPort: 5201, serverMode: "sshManaged", username: "anti", password: "preview", authMethod: "password", privateKeyPath: "" }
+          { id: "preview-1", note: "阿里云 · 上海", host: "aliserver.anti2027.cn", sshPort: 22, iperfPort: 5201, serverMode: "sshManaged", username: "root", password: "preview", authMethod: "password", privateKeyPath: "" },
+          { id: "preview-2", note: "家里软路由", host: "192.168.11.1", sshPort: 22, iperfPort: 5201, serverMode: "existing", username: "", password: "", authMethod: "password", privateKeyPath: "" },
+          { id: "preview-3", note: "开发机", host: "192.168.10.4", sshPort: 22, iperfPort: 5201, serverMode: "sshManaged", username: "anti", password: "preview", authMethod: "password", privateKeyPath: "" }
         ]
       : []
   );
   const [savedMenuOpen, setSavedMenuOpen] = useState(false);
+  const [savedNoteEditorOpen, setSavedNoteEditorOpen] = useState(false);
+  const [savedNoteDraft, setSavedNoteDraft] = useState("");
   const [savedBusy, setSavedBusy] = useState(false);
   const [promptDetailCopied, setPromptDetailCopied] = useState(false);
   const [bandwidthUnit, setBandwidthUnit] = useState<BandwidthUnit>(savedBandwidthUnit);
@@ -367,6 +370,12 @@ export function SpeedWorkbench() {
   }, [bandwidthUnit]);
 
   useEffect(() => {
+    if (savedMenuOpen) return;
+    setSavedNoteEditorOpen(false);
+    setSavedNoteDraft("");
+  }, [savedMenuOpen]);
+
+  useEffect(() => {
     if (!savedMenuOpen && !prompt) return;
     const handlePointerDown = (event: PointerEvent) => {
       if (savedMenuOpen && !savedControlRef.current?.contains(event.target as Node)) {
@@ -464,6 +473,14 @@ export function SpeedWorkbench() {
       ((duration === 0 || (duration >= 3 && duration <= 120)) &&
         parallelStreams >= 1 &&
         parallelStreams <= 32));
+  const canSaveCurrentServer =
+    form.host.trim().length > 0 &&
+    (!sshManaged || (
+      form.username.trim().length > 0 &&
+      (form.authMethod === "privateKey"
+        ? form.privateKeyPath.trim().length > 0
+        : form.password.length > 0)
+    ));
 
   const update = <K extends keyof ConnectionForm>(key: K, value: ConnectionForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -500,14 +517,22 @@ export function SpeedWorkbench() {
     }
   };
 
+  const openSavedNoteEditor = () => {
+    if (!canSaveCurrentServer || savedBusy) return;
+    const existing = savedServers.find(
+      (server) =>
+        server.host === form.host.trim() &&
+        server.sshPort === Number(form.sshPort) &&
+        server.username === form.username.trim() &&
+        server.serverMode === form.serverMode
+    );
+    setSavedNoteDraft(existing?.note ?? "");
+    setSavedNoteEditorOpen(true);
+  };
+
   const saveCurrentServer = async () => {
     const savedSecret = form.authMethod === "privateKey" ? form.passphrase : form.password;
-    if (
-      !form.host.trim() ||
-      (sshManaged && (!form.username.trim() ||
-        (form.authMethod === "privateKey" ? !form.privateKeyPath.trim() : !form.password))) ||
-      savedBusy
-    ) return;
+    if (!canSaveCurrentServer || savedBusy) return;
     const existing = savedServers.find(
       (server) =>
         server.host === form.host.trim() &&
@@ -519,6 +544,7 @@ export function SpeedWorkbench() {
     try {
       const saved = await saveServer({
         id: existing?.id,
+        note: savedNoteDraft.trim(),
         host: form.host.trim(),
         sshPort: Number(form.sshPort),
         iperfPort: Number(form.iperfPort),
@@ -529,7 +555,9 @@ export function SpeedWorkbench() {
         privateKeyPath: form.privateKeyPath.trim()
       });
       setSavedServers((current) => [saved, ...current.filter((server) => server.id !== saved.id)]);
-      setStatus({ phase: "idle", message: `已保存 ${saved.host} 到常用服务器` });
+      setSavedNoteEditorOpen(false);
+      setSavedNoteDraft("");
+      setStatus({ phase: "idle", message: `已保存 ${saved.note || saved.host} 到常用服务器` });
     } catch (error) {
       setStatus({ phase: "failed", message: errorMessage(error) });
     } finally {
@@ -687,19 +715,56 @@ export function SpeedWorkbench() {
                         <strong>常用服务器</strong>
                         <button
                           type="button"
-                          onClick={saveCurrentServer}
-                          disabled={
-                            !form.host.trim() ||
-                            (sshManaged && (!form.username.trim() ||
-                              (form.authMethod === "privateKey" ? !form.privateKeyPath.trim() : !form.password))) ||
-                            savedBusy
-                          }
-                          aria-label="保存当前服务器"
-                          title="保存当前服务器"
+                          onClick={openSavedNoteEditor}
+                          disabled={!canSaveCurrentServer || savedBusy}
+                          aria-label="添加当前服务器"
+                          title="添加当前服务器"
                         >
                           <Plus size={14} />
                         </button>
                       </div>
+                      <AnimatePresence initial={false}>
+                        {savedNoteEditorOpen && (
+                          <motion.form
+                            className="saved-note-editor"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void saveCurrentServer();
+                            }}
+                            initial={{ opacity: 0, height: 0, y: -4 }}
+                            animate={{ opacity: 1, height: "auto", y: 0 }}
+                            exit={{ opacity: 0, height: 0, y: -4 }}
+                          >
+                            <span title={form.host.trim()}>{form.host.trim()}</span>
+                            <div className="saved-note-row">
+                              <input
+                                autoFocus
+                                value={savedNoteDraft}
+                                maxLength={48}
+                                onChange={(event) => setSavedNoteDraft(event.target.value)}
+                                placeholder="备注（可选）"
+                                aria-label="服务器备注"
+                              />
+                              <button
+                                type="submit"
+                                disabled={savedBusy}
+                                aria-label="确认保存"
+                                title="确认保存"
+                              >
+                                <Check size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSavedNoteEditorOpen(false)}
+                                aria-label="取消"
+                                title="取消"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          </motion.form>
+                        )}
+                      </AnimatePresence>
                       <div className="saved-server-list">
                         {savedServers.length === 0 ? (
                           <span className="saved-empty">暂无常用服务器</span>
@@ -707,8 +772,9 @@ export function SpeedWorkbench() {
                           savedServers.map((server) => (
                             <div className="saved-server-item" key={server.id}>
                               <button type="button" onClick={() => selectSavedServer(server)}>
-                                <span>{server.host}</span>
-                                <small>
+                                <span className="saved-server-name">{server.note || server.host}</span>
+                                {server.note && <small className="saved-server-address">{server.host}</small>}
+                                <small className="saved-server-meta">
                                   {server.serverMode === "sshManaged"
                                     ? `${server.username} · SSH ${server.sshPort}`
                                     : `直连 · 端口 ${server.iperfPort}`}

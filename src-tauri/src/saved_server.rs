@@ -19,6 +19,8 @@ const METADATA_FILE: &str = "saved-servers.json";
 #[serde(rename_all = "camelCase")]
 pub struct SaveServerRequest {
     pub id: Option<String>,
+    #[serde(default)]
+    pub note: String,
     pub host: String,
     pub ssh_port: u16,
     pub iperf_port: u16,
@@ -39,6 +41,8 @@ pub struct DeleteServerRequest {
 #[serde(rename_all = "camelCase")]
 struct SavedServerMetadata {
     id: String,
+    #[serde(default)]
+    note: String,
     host: String,
     ssh_port: u16,
     iperf_port: u16,
@@ -63,6 +67,7 @@ fn default_server_mode() -> ServerMode {
 #[serde(rename_all = "camelCase")]
 pub struct SavedServer {
     id: String,
+    note: String,
     host: String,
     ssh_port: u16,
     iperf_port: u16,
@@ -135,6 +140,7 @@ fn list_inner(app: &AppHandle) -> Result<Vec<SavedServer>, String> {
         .map(|record| {
             SavedServer {
                 id: record.id,
+                note: record.note,
                 host: record.host,
                 ssh_port: record.ssh_port,
                 iperf_port: record.iperf_port,
@@ -162,8 +168,12 @@ fn password_inner(app: &AppHandle, request: DeleteServerRequest) -> Result<Strin
 }
 
 fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer, String> {
+    let note = request.note.trim().to_owned();
     let host = request.host.trim().to_owned();
     let username = request.username.trim().to_owned();
+    if note.chars().count() > 48 {
+        return Err("服务器备注不能超过 48 个字符".into());
+    }
     if host.is_empty() {
         return Err("服务器地址不能为空".into());
     }
@@ -207,6 +217,7 @@ fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer
         .unwrap_or_else(new_id);
     let metadata = SavedServerMetadata {
         id: id.clone(),
+        note: note.clone(),
         host: host.clone(),
         ssh_port: request.ssh_port,
         iperf_port: request.iperf_port,
@@ -230,6 +241,7 @@ fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer
 
     Ok(SavedServer {
         id,
+        note,
         host,
         ssh_port: request.ssh_port,
         iperf_port: request.iperf_port,
@@ -297,6 +309,7 @@ mod tests {
         let path = directory.join(METADATA_FILE);
         let records = vec![SavedServerMetadata {
             id: "server-1".into(),
+            note: "上海测试节点".into(),
             host: "10.0.0.8".into(),
             ssh_port: 22,
             iperf_port: 5201,
@@ -313,5 +326,14 @@ mod tests {
         assert_eq!(restored, records);
         assert!(!raw.contains("\"password\":"));
         let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn legacy_metadata_without_note_remains_readable() {
+        let legacy = br#"[{"id":"server-1","host":"10.0.0.8","sshPort":22,"iperfPort":5201,"username":"root"}]"#;
+        let restored: Vec<SavedServerMetadata> =
+            serde_json::from_slice(legacy).expect("read legacy metadata");
+
+        assert_eq!(restored[0].note, "");
     }
 }

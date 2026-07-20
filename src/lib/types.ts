@@ -47,6 +47,7 @@ export interface SpeedPromptEvent {
 
 export interface SavedServer {
   id: string;
+  note: string;
   host: string;
   sshPort: number;
   iperfPort: number;
@@ -59,6 +60,7 @@ export interface SavedServer {
 
 export interface SaveServerRequest {
   id?: string | null;
+  note: string;
   host: string;
   sshPort: number;
   iperfPort: number;

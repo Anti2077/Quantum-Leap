@@ -240,9 +240,10 @@ input:focus-visible {
   flex: 1 1 auto;
   flex-direction: column;
   gap: 13px;
+  margin-left: -5px;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 1px 5px 4px 1px;
+  padding: 1px 8px 4px 6px;
   scrollbar-width: thin;
   scrollbar-color: rgba(80, 137, 188, 0.22) transparent;
 }
@@ -325,7 +326,7 @@ input:focus-visible {
   top: 38px;
   right: 0;
   z-index: 20;
-  width: 250px;
+  width: 278px;
   overflow: hidden;
   border-radius: 16px;
   padding: 8px;
@@ -375,8 +376,68 @@ input:focus-visible {
   opacity: 0.25;
 }
 
+.saved-note-editor {
+  overflow: hidden;
+  margin: 2px 3px 7px;
+  border-radius: 10px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.045);
+}
+
+.saved-note-editor > span {
+  display: block;
+  overflow: hidden;
+  margin-bottom: 6px;
+  color: rgba(216, 231, 227, 0.4);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-note-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px 28px;
+  gap: 5px;
+}
+
+.saved-note-row input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 9px;
+  color: rgba(241, 248, 246, 0.82);
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.045);
+  font-size: 10px;
+  outline: none;
+}
+
+.saved-note-row input::placeholder {
+  color: rgba(216, 231, 227, 0.28);
+}
+
+.saved-note-row button {
+  display: grid;
+  width: 28px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  place-items: center;
+  color: rgba(216, 231, 227, 0.5);
+  background: rgba(255, 255, 255, 0.045);
+  cursor: pointer;
+}
+
+.saved-note-row button[type="submit"] {
+  color: rgba(138, 240, 218, 0.86);
+  background: rgba(98, 230, 209, 0.1);
+}
+
 .saved-server-list {
-  max-height: 200px;
+  max-height: 224px;
   overflow-y: auto;
 }
 
@@ -390,7 +451,7 @@ input:focus-visible {
 
 .saved-server-item {
   display: flex;
-  min-height: 48px;
+  min-height: 52px;
   align-items: center;
   border-radius: 10px;
   transition: background 150ms ease;
@@ -416,7 +477,7 @@ input:focus-visible {
 
 .saved-server-item > button:first-child span,
 .saved-server-item > button:first-child small {
-  max-width: 180px;
+  max-width: 208px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -427,7 +488,13 @@ input:focus-visible {
   font-weight: 620;
 }
 
-.saved-server-item > button:first-child small {
+.saved-server-item > button:first-child .saved-server-address {
+  margin-top: 2px;
+  color: rgba(216, 231, 227, 0.52);
+  font-size: 9px;
+}
+
+.saved-server-item > button:first-child .saved-server-meta {
   margin-top: 2px;
   color: rgba(216, 231, 227, 0.32);
   font-size: 9px;
@@ -1186,7 +1253,7 @@ h2 {
 .data-stream-field {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 1;
   overflow: visible;
   pointer-events: none;
 }
@@ -1283,7 +1350,8 @@ h2 {
 
 .number-ticker {
   position: relative;
-  z-index: 2;
+  z-index: 12;
+  isolation: isolate;
   display: flex;
   min-width: 0;
   height: 78px;
@@ -1293,6 +1361,8 @@ h2 {
 }
 
 .ticker-value {
+  position: relative;
+  z-index: 13;
   display: flex;
   height: 1em;
   align-items: flex-start;

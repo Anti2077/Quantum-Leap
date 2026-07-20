@@ -165,7 +165,7 @@ function ParticleCanvasComponent({
     if (!context) return;
 
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const lightTheme = document.documentElement.dataset.previewTheme !== undefined;
+    const lightTheme = document.documentElement.dataset.colorTheme !== "dark";
     let width = 0;
     let height = 0;
     let remoteRect: Rect = { left: 1, top: 1, width: 1, height: 1 };
@@ -546,7 +546,7 @@ function ParticleCanvasComponent({
       context.lineWidth = Math.max(1.6, size * 2.3);
       context.strokeStyle = lightTheme
         ? `rgba(39, 119, 186, ${alpha * 0.3})`
-        : `rgba(65, 139, 233, ${alpha * 0.2})`;
+        : `rgba(181, 220, 247, ${alpha * 0.34})`;
       context.stroke();
 
       const coreStart = Math.floor(trail.length * 0.46);
@@ -558,7 +558,7 @@ function ParticleCanvasComponent({
       context.lineWidth = Math.max(1.05, size * 1.38);
       context.strokeStyle = lightTheme
         ? `rgba(75, 151, 211, ${alpha * 0.72})`
-        : `rgba(218, 239, 255, ${alpha * 0.82})`;
+        : `rgba(235, 247, 255, ${alpha * 0.92})`;
       context.stroke();
     };
 
@@ -568,14 +568,14 @@ function ParticleCanvasComponent({
         context.arc(x, y, size * 3.8, 0, Math.PI * 2);
         context.fillStyle = lightTheme
           ? `rgba(45, 134, 205, ${alpha * 0.18})`
-          : `rgba(73, 148, 241, ${alpha * 0.15})`;
+          : `rgba(172, 220, 255, ${alpha * 0.26})`;
         context.fill();
       }
       context.beginPath();
       context.arc(x, y, energized ? size * 1.24 : size * 0.84, 0, Math.PI * 2);
       context.fillStyle = lightTheme
         ? `rgba(54, 132, 194, ${energized ? alpha * 0.88 : alpha * 0.58})`
-        : `rgba(218, 239, 255, ${energized ? alpha : alpha * 0.56})`;
+        : `rgba(238, 248, 255, ${energized ? alpha : alpha * 0.68})`;
       context.fill();
     };
 
