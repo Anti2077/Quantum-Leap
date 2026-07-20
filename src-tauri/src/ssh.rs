@@ -1,4 +1,4 @@
-use crate::model::RemoteTarget;
+use crate::model::{RemoteTarget, SshAuthMethod};
 use ssh2::{CheckResult, HashType, KnownHostFileKind, Session};
 use std::{
     env,
@@ -101,15 +101,47 @@ fn connect(remote: &RemoteTarget) -> Result<Session, SshError> {
         .handshake()
         .map_err(|err| SshError::Message(format!("SSH 握手失败：{err}")))?;
     verify_known_host(&session, remote)?;
-    session
-        .userauth_password(&remote.username, &remote.password)
-        .map_err(|err| SshError::Message(format!("SSH 认证失败：{err}")))?;
+    match remote.auth_method {
+        SshAuthMethod::Password => session
+            .userauth_password(&remote.username, &remote.password)
+            .map_err(|err| SshError::Message(format!("SSH 密码认证失败：{err}")))?,
+        SshAuthMethod::PrivateKey => {
+            let private_key = resolve_private_key(&remote.private_key_path)?;
+            let passphrase = (!remote.passphrase.is_empty()).then_some(remote.passphrase.as_str());
+            session
+                .userauth_pubkey_file(&remote.username, None, &private_key, passphrase)
+                .map_err(|err| SshError::Message(format!("SSH 私钥认证失败：{err}")))?;
+        }
+    }
 
     if !session.authenticated() {
         return Err(SshError::Message("SSH 认证未通过".into()));
     }
 
     Ok(session)
+}
+
+fn resolve_private_key(path: &str) -> Result<PathBuf, SshError> {
+    let path = path.trim();
+    let path = if path == "~" || path.starts_with("~/") {
+        let home = env::var_os("HOME")
+            .ok_or_else(|| SshError::Message("无法确定用户主目录，不能展开私钥路径".into()))?;
+        if path == "~" {
+            PathBuf::from(home)
+        } else {
+            PathBuf::from(home).join(&path[2..])
+        }
+    } else {
+        PathBuf::from(path)
+    };
+
+    if !path.is_file() {
+        return Err(SshError::Message(format!(
+            "SSH 私钥文件不存在：{}",
+            path.display()
+        )));
+    }
+    Ok(path)
 }
 
 fn verify_known_host(session: &Session, remote: &RemoteTarget) -> Result<(), SshError> {

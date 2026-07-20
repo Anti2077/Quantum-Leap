@@ -1,3 +1,4 @@
+use crate::model::{ServerMode, SshAuthMethod};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -21,8 +22,11 @@ pub struct SaveServerRequest {
     pub host: String,
     pub ssh_port: u16,
     pub iperf_port: u16,
+    pub server_mode: ServerMode,
     pub username: String,
     pub password: String,
+    pub auth_method: SshAuthMethod,
+    pub private_key_path: String,
 }
 
 #[derive(Clone, Deserialize)]
@@ -38,7 +42,21 @@ struct SavedServerMetadata {
     host: String,
     ssh_port: u16,
     iperf_port: u16,
+    #[serde(default = "default_server_mode")]
+    server_mode: ServerMode,
     username: String,
+    #[serde(default = "default_password_auth")]
+    auth_method: SshAuthMethod,
+    #[serde(default)]
+    private_key_path: String,
+}
+
+fn default_password_auth() -> SshAuthMethod {
+    SshAuthMethod::Password
+}
+
+fn default_server_mode() -> ServerMode {
+    ServerMode::SshManaged
 }
 
 #[derive(Clone, Serialize)]
@@ -48,8 +66,11 @@ pub struct SavedServer {
     host: String,
     ssh_port: u16,
     iperf_port: u16,
+    server_mode: ServerMode,
     username: String,
     password: String,
+    auth_method: SshAuthMethod,
+    private_key_path: String,
 }
 
 fn metadata_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -117,10 +138,13 @@ fn list_inner(app: &AppHandle) -> Result<Vec<SavedServer>, String> {
                 host: record.host,
                 ssh_port: record.ssh_port,
                 iperf_port: record.iperf_port,
+                server_mode: record.server_mode,
                 username: record.username,
                 // Passwords are unlocked lazily so launching the app never causes
                 // one Keychain authorization dialog per saved server.
                 password: String::new(),
+                auth_method: record.auth_method,
+                private_key_path: record.private_key_path,
             }
         })
         .collect())
@@ -128,8 +152,11 @@ fn list_inner(app: &AppHandle) -> Result<Vec<SavedServer>, String> {
 
 fn password_inner(app: &AppHandle, request: DeleteServerRequest) -> Result<String, String> {
     let records = read_metadata(&metadata_path(app)?)?;
-    if !records.iter().any(|record| record.id == request.id) {
+    let Some(record) = records.iter().find(|record| record.id == request.id) else {
         return Err("常用服务器不存在".into());
+    };
+    if record.server_mode == ServerMode::Existing {
+        return Ok(String::new());
     }
     keychain_get(&request.id)
 }
@@ -137,10 +164,27 @@ fn password_inner(app: &AppHandle, request: DeleteServerRequest) -> Result<Strin
 fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer, String> {
     let host = request.host.trim().to_owned();
     let username = request.username.trim().to_owned();
-    if host.is_empty() || username.is_empty() || request.password.is_empty() {
-        return Err("服务器地址、用户名和密码不能为空".into());
+    if host.is_empty() {
+        return Err("服务器地址不能为空".into());
     }
-    if request.ssh_port == 0 || request.iperf_port == 0 {
+    if request.server_mode == ServerMode::SshManaged && username.is_empty() {
+        return Err("SSH 模式需要填写用户名".into());
+    }
+    if request.server_mode == ServerMode::SshManaged
+        && request.auth_method == SshAuthMethod::Password
+        && request.password.is_empty()
+    {
+        return Err("密码登录需要填写 SSH 密码".into());
+    }
+    if request.server_mode == ServerMode::SshManaged
+        && request.auth_method == SshAuthMethod::PrivateKey
+        && request.private_key_path.trim().is_empty()
+    {
+        return Err("密钥登录需要填写私钥路径".into());
+    }
+    if request.iperf_port == 0
+        || (request.server_mode == ServerMode::SshManaged && request.ssh_port == 0)
+    {
         return Err("端口必须在 1 到 65535 之间".into());
     }
 
@@ -155,6 +199,7 @@ fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer
                 record.host == host
                     && record.ssh_port == request.ssh_port
                     && record.username == username
+                    && record.server_mode == request.server_mode
             })
         });
     let id = existing_index
@@ -165,10 +210,15 @@ fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer
         host: host.clone(),
         ssh_port: request.ssh_port,
         iperf_port: request.iperf_port,
+        server_mode: request.server_mode,
         username: username.clone(),
+        auth_method: request.auth_method,
+        private_key_path: request.private_key_path.trim().to_owned(),
     };
 
-    keychain_set(&id, &request.password)?;
+    if request.server_mode == ServerMode::SshManaged {
+        keychain_set(&id, &request.password)?;
+    }
     if let Some(index) = existing_index {
         records[index] = metadata;
     } else {
@@ -181,8 +231,11 @@ fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer
         host,
         ssh_port: request.ssh_port,
         iperf_port: request.iperf_port,
+        server_mode: request.server_mode,
         username,
         password: request.password,
+        auth_method: request.auth_method,
+        private_key_path: request.private_key_path.trim().to_owned(),
     })
 }
 
@@ -245,7 +298,10 @@ mod tests {
             host: "10.0.0.8".into(),
             ssh_port: 22,
             iperf_port: 5201,
+            server_mode: ServerMode::SshManaged,
             username: "tester".into(),
+            auth_method: SshAuthMethod::Password,
+            private_key_path: String::new(),
         }];
 
         write_metadata(&path, &records).expect("write metadata");
@@ -253,7 +309,7 @@ mod tests {
         let restored = read_metadata(&path).expect("read metadata");
 
         assert_eq!(restored, records);
-        assert!(!raw.contains("password"));
+        assert!(!raw.contains("\"password\":"));
         let _ = fs::remove_dir_all(directory);
     }
 }

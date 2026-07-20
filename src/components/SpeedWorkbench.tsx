@@ -6,6 +6,7 @@ import ArrowDownToLine from "lucide-react/dist/esm/icons/arrow-down-to-line.js";
 import ArrowUpFromLine from "lucide-react/dist/esm/icons/arrow-up-from-line.js";
 import BookMarked from "lucide-react/dist/esm/icons/book-marked.js";
 import Clock3 from "lucide-react/dist/esm/icons/clock-3.js";
+import FileKey2 from "lucide-react/dist/esm/icons/file-key-2.js";
 import Gauge from "lucide-react/dist/esm/icons/gauge.js";
 import KeyRound from "lucide-react/dist/esm/icons/key-round.js";
 import Layers3 from "lucide-react/dist/esm/icons/layers-3.js";
@@ -16,6 +17,7 @@ import Radio from "lucide-react/dist/esm/icons/radio.js";
 import Server from "lucide-react/dist/esm/icons/server.js";
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.js";
 import ShieldAlert from "lucide-react/dist/esm/icons/shield-alert.js";
+import Info from "lucide-react/dist/esm/icons/info.js";
 import Square from "lucide-react/dist/esm/icons/square.js";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
 import UserRound from "lucide-react/dist/esm/icons/user-round.js";
@@ -50,6 +52,8 @@ import type {
   SpeedSample,
   SpeedStateEvent,
   SpeedTestRequest,
+  ServerMode,
+  SshAuthMethod,
   TestMode,
   TransferDirection,
   TransportProtocol
@@ -66,8 +70,12 @@ interface ConnectionForm {
   host: string;
   sshPort: string;
   iperfPort: string;
+  serverMode: ServerMode;
   username: string;
   password: string;
+  authMethod: SshAuthMethod;
+  privateKeyPath: string;
+  passphrase: string;
   testMode: TestMode;
   direction: TransferDirection;
   protocol: TransportProtocol;
@@ -89,8 +97,12 @@ const initialForm: ConnectionForm = {
   host: "",
   sshPort: "22",
   iperfPort: "5201",
+  serverMode: "sshManaged",
   username: "",
   password: "",
+  authMethod: "password",
+  privateKeyPath: "~/.ssh/id_ed25519",
+  passphrase: "",
   testMode: "standard",
   direction: "upload",
   protocol: "tcp",
@@ -231,9 +243,9 @@ export function SpeedWorkbench() {
   const [savedServers, setSavedServers] = useState<SavedServer[]>(() =>
     designPreviewTheme
       ? [
-          { id: "preview-1", host: "aliserver.anti2027.cn", sshPort: 22, iperfPort: 5201, username: "root", password: "preview" },
-          { id: "preview-2", host: "192.168.11.1", sshPort: 22, iperfPort: 5201, username: "root", password: "preview" },
-          { id: "preview-3", host: "192.168.10.4", sshPort: 22, iperfPort: 5201, username: "anti", password: "preview" }
+          { id: "preview-1", host: "aliserver.anti2027.cn", sshPort: 22, iperfPort: 5201, serverMode: "sshManaged", username: "root", password: "preview", authMethod: "password", privateKeyPath: "" },
+          { id: "preview-2", host: "192.168.11.1", sshPort: 22, iperfPort: 5201, serverMode: "existing", username: "", password: "", authMethod: "password", privateKeyPath: "" },
+          { id: "preview-3", host: "192.168.10.4", sshPort: 22, iperfPort: 5201, serverMode: "sshManaged", username: "anti", password: "preview", authMethod: "password", privateKeyPath: "" }
         ]
       : []
   );
@@ -362,6 +374,7 @@ export function SpeedWorkbench() {
   const busy = previewDirection != null || ["starting", "running", "stopping"].includes(status.phase);
   const running = previewDirection != null || status.phase === "running";
   const standard = form.testMode === "standard";
+  const sshManaged = form.serverMode === "sshManaged";
   const completedStandard = standard && status.phase === "completed";
   const requestedDuration = form.durationSeconds.trim() === "" ? Number.NaN : Number(form.durationSeconds);
   const duration = standard
@@ -411,10 +424,14 @@ export function SpeedWorkbench() {
           );
   const valid =
     form.host.trim().length > 0 &&
-    form.username.trim().length > 0 &&
-    form.password.length > 0 &&
-    Number(form.sshPort) > 0 &&
     Number(form.iperfPort) > 0 &&
+    (!sshManaged || (
+      form.username.trim().length > 0 &&
+      (form.authMethod === "privateKey"
+        ? form.privateKeyPath.trim().length > 0
+        : form.password.length > 0) &&
+      Number(form.sshPort) > 0
+    )) &&
     (standard ||
       ((duration === 0 || (duration >= 3 && duration <= 120)) &&
         parallelStreams >= 1 &&
@@ -428,7 +445,9 @@ export function SpeedWorkbench() {
     if (savedBusy) return;
     setSavedBusy(true);
     try {
-      const password = server.password || (await getSavedServerPassword(server.id));
+      const password = server.serverMode === "sshManaged"
+        ? server.password || (await getSavedServerPassword(server.id))
+        : "";
       setSavedServers((current) =>
         current.map((saved) => (saved.id === server.id ? { ...saved, password } : saved))
       );
@@ -437,8 +456,12 @@ export function SpeedWorkbench() {
         host: server.host,
         sshPort: server.sshPort.toString(),
         iperfPort: server.iperfPort.toString(),
+        serverMode: server.serverMode,
         username: server.username,
-        password
+        password,
+        authMethod: server.authMethod,
+        privateKeyPath: server.privateKeyPath || initialForm.privateKeyPath,
+        passphrase: server.authMethod === "privateKey" ? password : ""
       }));
       setSavedMenuOpen(false);
       setStatus({ phase: "idle", message: `已载入 ${server.host}` });
@@ -450,12 +473,19 @@ export function SpeedWorkbench() {
   };
 
   const saveCurrentServer = async () => {
-    if (!form.host.trim() || !form.username.trim() || !form.password || savedBusy) return;
+    const savedSecret = form.authMethod === "privateKey" ? form.passphrase : form.password;
+    if (
+      !form.host.trim() ||
+      (sshManaged && (!form.username.trim() ||
+        (form.authMethod === "privateKey" ? !form.privateKeyPath.trim() : !form.password))) ||
+      savedBusy
+    ) return;
     const existing = savedServers.find(
       (server) =>
         server.host === form.host.trim() &&
         server.sshPort === Number(form.sshPort) &&
-        server.username === form.username.trim()
+        server.username === form.username.trim() &&
+        server.serverMode === form.serverMode
     );
     setSavedBusy(true);
     try {
@@ -464,8 +494,11 @@ export function SpeedWorkbench() {
         host: form.host.trim(),
         sshPort: Number(form.sshPort),
         iperfPort: Number(form.iperfPort),
+        serverMode: form.serverMode,
         username: form.username.trim(),
-        password: form.password
+        password: savedSecret,
+        authMethod: form.authMethod,
+        privateKeyPath: form.privateKeyPath.trim()
       });
       setSavedServers((current) => [saved, ...current.filter((server) => server.id !== saved.id)]);
       setStatus({ phase: "idle", message: `已保存 ${saved.host} 到常用服务器` });
@@ -491,7 +524,10 @@ export function SpeedWorkbench() {
 
   const launch = async (request: SpeedTestRequest) => {
     requestRef.current = request;
-    setStatus({ phase: "starting", message: "正在建立 SSH 安全通道" });
+    setStatus({
+      phase: "starting",
+      message: request.serverMode === "sshManaged" ? "正在建立 SSH 安全通道" : "正在连接已有测速服务"
+    });
     try {
       await startSpeedTest(request);
     } catch (error) {
@@ -507,8 +543,12 @@ export function SpeedWorkbench() {
       host: form.host.trim(),
       sshPort: Number(form.sshPort),
       iperfPort: Number(form.iperfPort),
+      serverMode: form.serverMode,
       username: form.username.trim(),
       password: form.password,
+      authMethod: form.authMethod,
+      privateKeyPath: form.privateKeyPath.trim(),
+      passphrase: form.passphrase,
       testMode: form.testMode,
       direction: form.direction,
       protocol,
@@ -574,7 +614,7 @@ export function SpeedWorkbench() {
           <GlassPanel className="connection-panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">SSH endpoint</span>
+                <span className="eyebrow">{sshManaged ? "SSH endpoint" : "IPERF3 endpoint"}</span>
                 <h1>连接服务器</h1>
               </div>
               <div className="saved-server-control" ref={savedControlRef}>
@@ -601,7 +641,12 @@ export function SpeedWorkbench() {
                         <button
                           type="button"
                           onClick={saveCurrentServer}
-                          disabled={!form.host.trim() || !form.username.trim() || !form.password || savedBusy}
+                          disabled={
+                            !form.host.trim() ||
+                            (sshManaged && (!form.username.trim() ||
+                              (form.authMethod === "privateKey" ? !form.privateKeyPath.trim() : !form.password))) ||
+                            savedBusy
+                          }
                           aria-label="保存当前服务器"
                           title="保存当前服务器"
                         >
@@ -616,7 +661,11 @@ export function SpeedWorkbench() {
                             <div className="saved-server-item" key={server.id}>
                               <button type="button" onClick={() => selectSavedServer(server)}>
                                 <span>{server.host}</span>
-                                <small>{server.username} · SSH {server.sshPort}</small>
+                                <small>
+                                  {server.serverMode === "sshManaged"
+                                    ? `${server.username} · SSH ${server.sshPort}`
+                                    : `直连 · 端口 ${server.iperfPort}`}
+                                </small>
                               </button>
                               <button
                                 type="button"
@@ -637,7 +686,41 @@ export function SpeedWorkbench() {
               </div>
             </div>
 
-            <form onSubmit={submit} className="connection-form">
+              <form onSubmit={submit} className="connection-form">
+                <div className="connection-scroll-region">
+                <div className="server-mode-picker">
+                  <div className="server-mode-label">
+                    <FieldLabel icon={<Server size={13} />}>服务模式</FieldLabel>
+                    <span className="mode-help" tabIndex={0} aria-label="服务模式说明">
+                      <Info size={14} aria-hidden="true" />
+                      <span className="mode-tooltip" role="tooltip">
+                        <strong>SSH 自动管理</strong>
+                        <span>连接服务器，启动 iperf3 -s，测试完成后自动关闭本次服务。</span>
+                        <strong>直连已有服务</strong>
+                        <span>适用于 Docker、权限受限或 systemctl 持久化运行的服务，只需填写测速端口。</span>
+                      </span>
+                    </span>
+                  </div>
+                  <div className="test-mode-tabs server-mode-tabs" aria-label="服务模式">
+                    <button
+                      type="button"
+                      className={sshManaged ? "selected" : ""}
+                      disabled={busy}
+                      onClick={() => update("serverMode", "sshManaged")}
+                    >
+                      SSH 自动管理
+                    </button>
+                    <button
+                      type="button"
+                      className={!sshManaged ? "selected" : ""}
+                      disabled={busy}
+                      onClick={() => update("serverMode", "existing")}
+                    >
+                      直连已有服务
+                    </button>
+                  </div>
+                </div>
+
               <label>
                 <FieldLabel icon={<Radio size={13} />}>服务器地址</FieldLabel>
                 <input
@@ -652,19 +735,121 @@ export function SpeedWorkbench() {
                 />
               </label>
 
-              <div className="field-grid">
-                <label>
-                  <FieldLabel icon={<Server size={13} />}>SSH 端口</FieldLabel>
-                  <input
-                    className="glass-input"
-                    type="number"
-                    min="1"
-                    max="65535"
-                    value={form.sshPort}
-                    disabled={busy}
-                    onChange={(event) => update("sshPort", event.target.value)}
-                  />
-                </label>
+              {sshManaged ? (
+                <>
+                  <div className="field-grid">
+                    <label>
+                      <FieldLabel icon={<Server size={13} />}>SSH 端口</FieldLabel>
+                      <input
+                        className="glass-input"
+                        type="number"
+                        min="1"
+                        max="65535"
+                        value={form.sshPort}
+                        disabled={busy}
+                        onChange={(event) => update("sshPort", event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      <FieldLabel icon={<Activity size={13} />}>测速端口</FieldLabel>
+                      <input
+                        className="glass-input"
+                        type="number"
+                        min="1"
+                        max="65535"
+                        value={form.iperfPort}
+                        disabled={busy}
+                        onChange={(event) => update("iperfPort", event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <label>
+                    <FieldLabel icon={<UserRound size={13} />}>用户名</FieldLabel>
+                    <input
+                      className="glass-input"
+                      value={form.username}
+                      disabled={busy}
+                      onChange={(event) => update("username", event.target.value)}
+                      placeholder="ubuntu"
+                      autoComplete="username"
+                    />
+                  </label>
+                  <div className="test-mode-tabs auth-method-tabs" aria-label="SSH 认证方式">
+                    <button
+                      type="button"
+                      className={form.authMethod === "password" ? "selected" : ""}
+                      disabled={busy}
+                      onClick={() => update("authMethod", "password")}
+                    >
+                      <KeyRound size={14} aria-hidden="true" />
+                      密码登录
+                    </button>
+                    <button
+                      type="button"
+                      className={form.authMethod === "privateKey" ? "selected" : ""}
+                      disabled={busy}
+                      onClick={() => update("authMethod", "privateKey")}
+                    >
+                      <FileKey2 size={14} aria-hidden="true" />
+                      SSH 密钥
+                    </button>
+                  </div>
+                  <AnimatePresence mode="wait" initial={false}>
+                    {form.authMethod === "privateKey" ? (
+                      <motion.div
+                        key="private-key-fields"
+                        className="private-key-fields"
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                      >
+                        <label>
+                          <FieldLabel icon={<FileKey2 size={13} />}>SSH 私钥路径</FieldLabel>
+                          <input
+                            className="glass-input"
+                            value={form.privateKeyPath}
+                            disabled={busy}
+                            onChange={(event) => update("privateKeyPath", event.target.value)}
+                            placeholder="~/.ssh/id_ed25519"
+                            spellCheck={false}
+                            autoComplete="off"
+                          />
+                        </label>
+                        <label>
+                          <FieldLabel icon={<KeyRound size={13} />}>私钥口令（可选）</FieldLabel>
+                          <input
+                            className="glass-input"
+                            type="password"
+                            value={form.passphrase}
+                            disabled={busy}
+                            onChange={(event) => update("passphrase", event.target.value)}
+                            placeholder="未加密私钥可留空"
+                            autoComplete="off"
+                          />
+                        </label>
+                      </motion.div>
+                    ) : (
+                      <motion.label
+                        key="password-field"
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                      >
+                        <FieldLabel icon={<KeyRound size={13} />}>SSH 密码</FieldLabel>
+                        <input
+                          className="glass-input"
+                          type="password"
+                          value={form.password}
+                          disabled={busy}
+                          onChange={(event) => update("password", event.target.value)}
+                          placeholder="输入密码"
+                          autoComplete="current-password"
+                        />
+                      </motion.label>
+                    )}
+                  </AnimatePresence>
+                </>
+              ) : (
                 <label>
                   <FieldLabel icon={<Activity size={13} />}>测速端口</FieldLabel>
                   <input
@@ -677,33 +862,11 @@ export function SpeedWorkbench() {
                     onChange={(event) => update("iperfPort", event.target.value)}
                   />
                 </label>
-              </div>
+              )}
 
-              <label>
-                <FieldLabel icon={<UserRound size={13} />}>用户名</FieldLabel>
-                <input
-                  className="glass-input"
-                  value={form.username}
-                  disabled={busy}
-                  onChange={(event) => update("username", event.target.value)}
-                  placeholder="ubuntu"
-                  autoComplete="username"
-                />
-              </label>
+                </div>
 
-              <label>
-                <FieldLabel icon={<KeyRound size={13} />}>SSH 密码</FieldLabel>
-                <input
-                  className="glass-input"
-                  type="password"
-                  value={form.password}
-                  disabled={busy}
-                  onChange={(event) => update("password", event.target.value)}
-                  placeholder="输入密码"
-                  autoComplete="current-password"
-                />
-              </label>
-
+                <div className="connection-fixed-controls">
               <div className="test-mode-tabs" aria-label="测速模式">
                 <button
                   type="button"
@@ -833,6 +996,7 @@ export function SpeedWorkbench() {
                   <Square size={15} fill="currentColor" aria-hidden="true" />
                 </button>
               </div>
+                </div>
             </form>
           </GlassPanel>
         </aside>

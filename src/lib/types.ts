@@ -1,13 +1,19 @@
 export type TransferDirection = "upload" | "download";
 export type TestMode = "standard" | "advanced";
 export type TransportProtocol = "tcp" | "udp";
+export type SshAuthMethod = "password" | "privateKey";
+export type ServerMode = "sshManaged" | "existing";
 
 export interface SpeedTestRequest {
   host: string;
   sshPort: number;
   iperfPort: number;
+  serverMode: ServerMode;
   username: string;
   password: string;
+  authMethod: SshAuthMethod;
+  privateKeyPath: string;
+  passphrase: string;
   testMode: TestMode;
   direction: TransferDirection;
   protocol: TransportProtocol;
@@ -44,8 +50,11 @@ export interface SavedServer {
   host: string;
   sshPort: number;
   iperfPort: number;
+  serverMode: ServerMode;
   username: string;
   password: string;
+  authMethod: SshAuthMethod;
+  privateKeyPath: string;
 }
 
 export interface SaveServerRequest {
@@ -53,6 +62,9 @@ export interface SaveServerRequest {
   host: string;
   sshPort: number;
   iperfPort: number;
+  serverMode: ServerMode;
   username: string;
   password: string;
+  authMethod: SshAuthMethod;
+  privateKeyPath: string;
 }

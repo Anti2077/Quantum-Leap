@@ -18,14 +18,15 @@
 html,
 body,
 #root {
+  height: 100%;
   min-height: 100%;
   margin: 0;
 }
 
 body {
   min-width: 320px;
-  min-height: 100vh;
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
   background: #071011;
   -webkit-font-smoothing: antialiased;
 }
@@ -48,6 +49,7 @@ input:focus-visible {
 .app-frame {
   position: relative;
   min-height: 100vh;
+  height: 100vh;
   overflow: hidden;
   background:
     linear-gradient(132deg, rgba(71, 129, 120, 0.14) 0%, transparent 36%),
@@ -169,15 +171,18 @@ input:focus-visible {
   position: relative;
   z-index: 2;
   display: grid;
-  min-height: calc(100vh - 44px);
+  height: calc(100vh - 44px);
+  min-height: 0;
   grid-template-columns: 316px minmax(0, 1fr);
   gap: 20px;
   padding: 18px 24px 24px;
+  overflow: hidden;
 }
 
 .connection-column,
 .speed-column {
   min-width: 0;
+  min-height: 0;
 }
 
 .glass-panel,
@@ -214,8 +219,49 @@ input:focus-visible {
 
 .connection-panel {
   height: 100%;
-  min-height: 610px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   padding: 25px 22px 22px;
+}
+
+.connection-panel > .panel-heading {
+  flex: 0 0 auto;
+}
+
+.connection-form {
+  min-height: 0;
+  flex: 1;
+}
+
+.connection-scroll-region {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 13px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 1px 5px 4px 1px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(80, 137, 188, 0.22) transparent;
+}
+
+.connection-fixed-controls {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 13px;
+  padding-top: 13px;
+}
+
+.private-key-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-method-tabs {
+  margin-top: 2px;
 }
 
 .panel-heading,
@@ -431,7 +477,86 @@ h2 {
 .connection-form {
   display: flex;
   flex-direction: column;
-  gap: 13px;
+  gap: 0;
+}
+
+.server-mode-picker {
+  display: grid;
+  gap: 7px;
+}
+
+.server-mode-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.server-mode-label .field-label {
+  margin-bottom: 0;
+}
+
+.mode-help {
+  position: relative;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 7px;
+  color: rgba(213, 231, 226, 0.42);
+  outline: none;
+  cursor: help;
+}
+
+.mode-help:hover,
+.mode-help:focus-visible {
+  color: rgba(105, 231, 210, 0.9);
+  background: rgba(98, 230, 209, 0.08);
+}
+
+.mode-tooltip {
+  position: absolute;
+  top: 27px;
+  right: 0;
+  z-index: 30;
+  display: none;
+  width: 244px;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 11px;
+  color: rgba(226, 239, 235, 0.66);
+  background: rgba(7, 17, 18, 0.97);
+  box-shadow: 0 16px 35px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  font-size: 10px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+.mode-tooltip strong,
+.mode-tooltip span {
+  display: block;
+}
+
+.mode-tooltip strong {
+  margin-top: 5px;
+  color: rgba(244, 251, 249, 0.9);
+  font-size: 10px;
+}
+
+.mode-tooltip strong:first-child {
+  margin-top: 0;
+}
+
+.mode-help:hover .mode-tooltip,
+.mode-help:focus-visible .mode-tooltip {
+  display: block;
+}
+
+.server-mode-tabs {
+  height: 39px;
+}
+
+.server-mode-tabs > button {
+  font-size: 11px;
 }
 
 .connection-form label {
@@ -1736,7 +1861,7 @@ h2 {
   }
 
   .connection-panel {
-    min-height: 590px;
+    min-height: 0;
     padding-top: 19px;
   }
 

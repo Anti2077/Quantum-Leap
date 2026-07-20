@@ -380,15 +380,19 @@ pub fn parse_sample(line: &str, direction: TransferDirection) -> Option<SpeedSam
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::TestMode;
+    use crate::model::{ServerMode, SshAuthMethod, TestMode};
 
     fn request() -> SpeedTestRequest {
         SpeedTestRequest {
             host: "10.0.0.8".into(),
             ssh_port: 22,
             iperf_port: 5201,
+            server_mode: ServerMode::SshManaged,
             username: "tester".into(),
             password: "secret".into(),
+            auth_method: SshAuthMethod::Password,
+            private_key_path: String::new(),
+            passphrase: String::new(),
             test_mode: TestMode::Advanced,
             direction: TransferDirection::Upload,
             protocol: TransportProtocol::Tcp,

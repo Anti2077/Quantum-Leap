@@ -24,14 +24,32 @@ pub enum TransportProtocol {
     Udp,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SshAuthMethod {
+    Password,
+    PrivateKey,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ServerMode {
+    SshManaged,
+    Existing,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeedTestRequest {
     pub host: String,
     pub ssh_port: u16,
     pub iperf_port: u16,
+    pub server_mode: ServerMode,
     pub username: String,
     pub password: String,
+    pub auth_method: SshAuthMethod,
+    pub private_key_path: String,
+    pub passphrase: String,
     pub test_mode: TestMode,
     pub direction: TransferDirection,
     pub protocol: TransportProtocol,
@@ -46,14 +64,25 @@ impl SpeedTestRequest {
         if self.host.trim().is_empty() || self.host.chars().any(char::is_whitespace) {
             return Err("请输入有效的服务器地址".into());
         }
-        if self.username.trim().is_empty() {
-            return Err("请输入 SSH 用户名".into());
-        }
-        if self.password.is_empty() {
-            return Err("请输入 SSH 密码".into());
-        }
-        if self.ssh_port == 0 || self.iperf_port == 0 {
+        if self.iperf_port == 0 {
             return Err("端口必须在 1 到 65535 之间".into());
+        }
+        if self.server_mode == ServerMode::SshManaged {
+            if self.username.trim().is_empty() {
+                return Err("请输入 SSH 用户名".into());
+            }
+            match self.auth_method {
+                SshAuthMethod::Password if self.password.is_empty() => {
+                    return Err("请输入 SSH 密码".into());
+                }
+                SshAuthMethod::PrivateKey if self.private_key_path.trim().is_empty() => {
+                    return Err("请输入 SSH 私钥路径".into());
+                }
+                _ => {}
+            }
+            if self.ssh_port == 0 {
+                return Err("端口必须在 1 到 65535 之间".into());
+            }
         }
         if self.test_mode == TestMode::Advanced
             && self.duration_seconds != 0
@@ -98,6 +127,9 @@ impl SpeedTestRequest {
             iperf_port: self.iperf_port,
             username: self.username.trim().to_owned(),
             password: self.password.clone(),
+            auth_method: self.auth_method,
+            private_key_path: self.private_key_path.trim().to_owned(),
+            passphrase: self.passphrase.clone(),
             allow_host_key_mismatch: self.allow_host_key_mismatch,
         }
     }
@@ -110,6 +142,9 @@ pub struct RemoteTarget {
     pub iperf_port: u16,
     pub username: String,
     pub password: String,
+    pub auth_method: SshAuthMethod,
+    pub private_key_path: String,
+    pub passphrase: String,
     pub allow_host_key_mismatch: bool,
 }
 
@@ -150,8 +185,12 @@ mod tests {
             host: "10.0.0.8".into(),
             ssh_port: 22,
             iperf_port: 5201,
+            server_mode: ServerMode::SshManaged,
             username: "tester".into(),
             password: "secret".into(),
+            auth_method: SshAuthMethod::Password,
+            private_key_path: String::new(),
+            passphrase: String::new(),
             test_mode,
             direction: TransferDirection::Upload,
             protocol: TransportProtocol::Udp,
@@ -188,5 +227,30 @@ mod tests {
 
         assert!(request.validate().is_ok());
         assert_eq!(request.effective_duration(), 0);
+    }
+
+    #[test]
+    fn private_key_auth_accepts_frontend_shape_without_password() {
+        let mut request = request(TestMode::Standard);
+        request.auth_method = SshAuthMethod::PrivateKey;
+        request.password.clear();
+        request.private_key_path = "~/.ssh/id_ed25519".into();
+
+        assert!(request.validate().is_ok());
+        let encoded =
+            serde_json::to_string(&serde_json::json!({ "authMethod": request.auth_method }))
+                .expect("serialize auth method");
+        assert!(encoded.contains("privateKey"));
+    }
+
+    #[test]
+    fn existing_service_does_not_require_ssh_credentials() {
+        let mut request = request(TestMode::Standard);
+        request.server_mode = ServerMode::Existing;
+        request.ssh_port = 0;
+        request.username.clear();
+        request.password.clear();
+
+        assert!(request.validate().is_ok());
     }
 }
