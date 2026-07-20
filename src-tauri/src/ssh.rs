@@ -317,7 +317,16 @@ fn server_start_command(remote: &RemoteTarget, one_off: bool) -> String {
            elif command -v brew >/dev/null 2>&1; then package_manager=brew; fi; \
            echo IPERF3_NOT_FOUND:$package_manager >&2; exit 127; \
          fi; \
-         nohup \"$IPERF3_BIN\" -s {one_off_flag} -p {port} >{log} 2>&1 </dev/null & pid=$!; \
+         start_iperf() {{ \
+           if command -v nohup >/dev/null 2>&1; then \
+             exec nohup \"$IPERF3_BIN\" -s {one_off_flag} -p {port}; \
+           elif command -v setsid >/dev/null 2>&1; then \
+             exec setsid \"$IPERF3_BIN\" -s {one_off_flag} -p {port}; \
+           else \
+             trap '' HUP; exec \"$IPERF3_BIN\" -s {one_off_flag} -p {port}; \
+           fi; \
+         }}; \
+         start_iperf >{log} 2>&1 </dev/null & pid=$!; \
          sleep 0.25; kill -0 $pid 2>/dev/null || {{ cat {log} >&2; exit 1; }}; echo $pid",
         port = remote.iperf_port,
         log = shell_quote(&log_path),
@@ -544,6 +553,9 @@ mod tests {
         assert!(command.contains(".qpkg/Entware/bin/iperf3"));
         assert!(command.contains("package_manager=apt-get"));
         assert!(command.contains("IPERF3_NOT_FOUND:$package_manager"));
+        assert!(command.contains("command -v nohup"));
+        assert!(command.contains("command -v setsid"));
+        assert!(command.contains("trap '\"'\"''\"'\"' HUP"));
         assert!(command.contains("-s -1 -p 5201"));
     }
 
