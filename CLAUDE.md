@@ -4,11 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-An iperf3 network bandwidth testing desktop GUI. Three parallel implementations exist in this repo:
+An iperf3 network bandwidth testing desktop GUI implemented with Tauri 2, Rust, React, and TypeScript:
 
-- **`src-tauri/` + `src/`** — Primary: Tauri 2 (Rust) + Vite + React 18 + TypeScript + Tailwind CSS + framer-motion + recharts
-- **`macOSApp/`** — Native SwiftUI macOS app (Swift Package Manager, no Xcode project needed)
-- **`iperf3GlassSpeed/`** — Xcode project for the same SwiftUI app (possibly stale vs `macOSApp/`)
+- **`src-tauri/` + `src/`** — Tauri 2 (Rust) + Vite + React 18 + TypeScript + Tailwind CSS + framer-motion
 
 UI is a dark glass-morphism (glassmorphism) design with animated SVG energy links, fluid area charts, and spring-animated number tickers.
 
@@ -20,12 +18,6 @@ npm run tauri:dev     # Full Tauri dev mode (Vite + Rust backend)
 npm run tauri:build   # Production macOS bundle
 npm run build         # Vite production build only
 npm run preview       # Preview Vite production build
-```
-
-For the SwiftUI SPM version (`macOSApp/`):
-```bash
-swift build --package-path macOSApp
-swift run --package-path macOSApp iperf3GlassSpeed
 ```
 
 There are currently **no tests** in this repository.
@@ -68,12 +60,8 @@ src/
 
 **Tauri config** (`tauri.conf.json`): Window 1440×980, no native decorations (`decorations: false`), `titleBarStyle: "Overlay"`, macOS 13.0+ minimum.
 
-### SwiftUI Version (`macOSApp/`)
-
-Uses native `Process` to run `/usr/bin/ssh` with an SSH_ASKPASS helper script (a temporary shell script that prints the password from env var). Same logic: SSH to start remote iperf3 server, then run local `iperf3 -c` parsing JSON output. Built with Swift 6.0, macOS 13.0 target.
-
 ## Key Design Decisions
 
 - The app does **not bundle iperf3** — it expects `iperf3` to be available on both the local machine and the remote host's `$PATH`.
-- SSH authentication is **password-only** (no key-based auth). The password is passed via env var in the Swift version and directly in the Rust `ssh2` library call.
+- SSH authentication is handled by the Rust backend through the `ssh2` library.
 - The remote iperf3 server runs on a user-specified port; the app uses the same port for SSH (22) and iperf3 traffic — these are independently configurable in the form but the `port` field in the Tauri frontend controls the iperf3 port only (SSH always uses port 22).
