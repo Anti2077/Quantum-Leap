@@ -1,4 +1,6 @@
-use crate::model::{SpeedSampleEvent, SpeedTestRequest, TransferDirection, TransportProtocol};
+use crate::model::{
+    ServerMode, SpeedSampleEvent, SpeedTestRequest, TransferDirection, TransportProtocol,
+};
 use serde_json::Value;
 use std::{env, path::PathBuf, process::Stdio, sync::Arc, time::Instant};
 use tauri::{async_runtime::JoinHandle, AppHandle, Emitter};
@@ -45,6 +47,10 @@ fn is_server_unavailable(detail: &str) -> bool {
     ]
     .iter()
     .any(|message| normalized.contains(message))
+}
+
+fn should_report_server_unavailable(request: &SpeedTestRequest, detail: &str) -> bool {
+    request.server_mode == ServerMode::Existing || is_server_unavailable(detail)
 }
 
 fn resolve_iperf3_binary() -> Result<PathBuf, String> {
@@ -256,7 +262,7 @@ pub async fn run_local_client(
                     RunError::Message(
                         "本机 iperf3 版本过旧，不支持实时 JSON；请升级到 iperf3 3.17 或更高版本".into()
                     )
-                } else if is_server_unavailable(detail) {
+                } else if should_report_server_unavailable(request, detail) {
                     RunError::ServerUnavailable
                 } else if detail.is_empty() {
                     RunError::Message(format!("iperf3 异常退出：{status}"))
@@ -281,7 +287,7 @@ pub async fn run_local_client(
     let stderr = stderr_task.await.unwrap_or_default();
     if sample_count == 0 {
         let detail = stderr.trim();
-        if is_server_unavailable(detail) {
+        if should_report_server_unavailable(request, detail) {
             return Err(RunError::ServerUnavailable);
         }
         return Err(RunError::Message(if detail.is_empty() {
@@ -461,6 +467,15 @@ mod tests {
         ));
         assert!(is_server_unavailable("connect failed: No route to host"));
         assert!(!is_server_unavailable("unrecognized option --json-stream"));
+    }
+
+    #[test]
+    fn treats_any_failed_connection_as_unavailable_in_direct_mode() {
+        let mut request = request();
+        request.server_mode = ServerMode::Existing;
+
+        assert!(should_report_server_unavailable(&request, ""));
+        assert!(should_report_server_unavailable(&request, "exit status: 1"));
     }
 
     #[test]
