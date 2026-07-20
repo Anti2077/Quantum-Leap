@@ -671,6 +671,25 @@ html[data-preview-theme][data-color-theme="light"] .metric-cell strong {
   color: rgba(22, 45, 68, 0.84);
 }
 
+html[data-preview-theme][data-color-theme="light"] .field-helper {
+  color: rgba(42, 68, 78, 0.58);
+}
+
+html[data-preview-theme][data-color-theme="light"] .field-helper.is-error {
+  color: rgba(179, 71, 47, 0.9);
+}
+
+html[data-preview-theme][data-color-theme="light"] .metric-cell.quality-warning {
+  background: linear-gradient(145deg, rgba(231, 163, 42, 0.14), rgba(221, 103, 73, 0.08));
+  box-shadow: inset 0 0 0 1px rgba(189, 126, 20, 0.14);
+}
+
+html[data-preview-theme][data-color-theme="light"] .metric-cell.quality-warning strong,
+html[data-preview-theme][data-color-theme="light"] .metric-cell.quality-warning .metric-label-with-icon,
+html[data-preview-theme][data-color-theme="light"] .status-line.has-network-warning p {
+  color: rgba(139, 85, 8, 0.9);
+}
+
 html[data-preview-theme][data-color-theme="light"] .metric-cell.accent-upload strong,
 html[data-preview-theme][data-color-theme="light"] .average-label.upload,
 html[data-preview-theme][data-color-theme="light"] .maximum-label.upload {

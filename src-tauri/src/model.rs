@@ -44,6 +44,8 @@ pub struct SpeedTestRequest {
     pub host: String,
     pub ssh_port: u16,
     pub iperf_port: u16,
+    #[serde(default)]
+    pub remote_iperf_path: String,
     pub server_mode: ServerMode,
     pub username: String,
     pub password: String,
@@ -68,6 +70,7 @@ impl SpeedTestRequest {
             return Err("端口必须在 1 到 65535 之间".into());
         }
         if self.server_mode == ServerMode::SshManaged {
+            validate_remote_iperf_path(&self.remote_iperf_path)?;
             if self.username.trim().is_empty() {
                 return Err("请输入 SSH 用户名".into());
             }
@@ -125,6 +128,7 @@ impl SpeedTestRequest {
             host: self.host.trim().to_owned(),
             ssh_port: self.ssh_port,
             iperf_port: self.iperf_port,
+            iperf_path: self.remote_iperf_path.trim().to_owned(),
             username: self.username.trim().to_owned(),
             password: self.password.clone(),
             auth_method: self.auth_method,
@@ -140,12 +144,24 @@ pub struct RemoteTarget {
     pub host: String,
     pub ssh_port: u16,
     pub iperf_port: u16,
+    pub iperf_path: String,
     pub username: String,
     pub password: String,
     pub auth_method: SshAuthMethod,
     pub private_key_path: String,
     pub passphrase: String,
     pub allow_host_key_mismatch: bool,
+}
+
+pub fn validate_remote_iperf_path(path: &str) -> Result<(), String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Ok(());
+    }
+    if !path.starts_with('/') || path.chars().any(char::is_control) {
+        return Err("远端 iperf3 路径必须是有效的绝对路径，例如 /opt/bin/iperf3".into());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -185,6 +201,7 @@ mod tests {
             host: "10.0.0.8".into(),
             ssh_port: 22,
             iperf_port: 5201,
+            remote_iperf_path: String::new(),
             server_mode: ServerMode::SshManaged,
             username: "tester".into(),
             password: "secret".into(),
@@ -251,6 +268,16 @@ mod tests {
         request.username.clear();
         request.password.clear();
 
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn custom_remote_iperf_path_must_be_absolute() {
+        let mut request = request(TestMode::Standard);
+        request.remote_iperf_path = "opt/bin/iperf3".into();
+        assert!(request.validate().is_err());
+
+        request.remote_iperf_path = "/opt/bin/iperf3".into();
         assert!(request.validate().is_ok());
     }
 }

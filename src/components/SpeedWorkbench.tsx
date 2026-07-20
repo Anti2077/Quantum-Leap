@@ -75,6 +75,7 @@ interface ConnectionForm {
   host: string;
   sshPort: string;
   iperfPort: string;
+  remoteIperfPath: string;
   serverMode: ServerMode;
   username: string;
   password: string;
@@ -102,6 +103,7 @@ const initialForm: ConnectionForm = {
   host: "",
   sshPort: "22",
   iperfPort: "5201",
+  remoteIperfPath: "",
   serverMode: "sshManaged",
   username: "",
   password: "",
@@ -262,9 +264,9 @@ export function SpeedWorkbench() {
   const [savedServers, setSavedServers] = useState<SavedServer[]>(() =>
     designPreviewTheme
       ? [
-          { id: "preview-1", note: "阿里云 · 上海", host: "aliserver.anti2027.cn", sshPort: 22, iperfPort: 5201, serverMode: "sshManaged", username: "root", password: "preview", authMethod: "password", privateKeyPath: "" },
-          { id: "preview-2", note: "家里软路由", host: "192.168.11.1", sshPort: 22, iperfPort: 5201, serverMode: "existing", username: "", password: "", authMethod: "password", privateKeyPath: "" },
-          { id: "preview-3", note: "开发机", host: "192.168.10.4", sshPort: 22, iperfPort: 5201, serverMode: "sshManaged", username: "anti", password: "preview", authMethod: "password", privateKeyPath: "" }
+          { id: "preview-1", note: "阿里云 · 上海", host: "aliserver.anti2027.cn", sshPort: 22, iperfPort: 5201, remoteIperfPath: "", serverMode: "sshManaged", username: "root", password: "preview", authMethod: "password", privateKeyPath: "" },
+          { id: "preview-2", note: "家里软路由", host: "192.168.11.1", sshPort: 22, iperfPort: 5201, remoteIperfPath: "", serverMode: "existing", username: "", password: "", authMethod: "password", privateKeyPath: "" },
+          { id: "preview-3", note: "开发机", host: "192.168.10.4", sshPort: 22, iperfPort: 5201, remoteIperfPath: "/opt/bin/iperf3", serverMode: "sshManaged", username: "anti", password: "preview", authMethod: "password", privateKeyPath: "" }
         ]
       : []
   );
@@ -422,6 +424,8 @@ export function SpeedWorkbench() {
   const continuous = !standard && duration === 0;
   const parallelStreams = standard ? STANDARD_PARALLEL_STREAMS : Number(form.parallelStreams) || 1;
   const protocol: TransportProtocol = standard ? "tcp" : form.protocol;
+  const remoteIperfPath = form.remoteIperfPath.trim();
+  const remoteIperfPathInvalid = sshManaged && remoteIperfPath.length > 0 && !remoteIperfPath.startsWith("/");
   const activeDirection = previewDirection ?? (standard ? (latest?.direction ?? "upload") : form.direction);
   const activeSamples = useMemo(
     () => samples.filter((sample) => sample.direction === activeDirection),
@@ -432,6 +436,11 @@ export function SpeedWorkbench() {
   const overallStats = useMemo(() => summarize(samples), [samples]);
   const activeStats = activeDirection === "upload" ? uploadStats : downloadStats;
   const totalBytes = uploadStats.bytes + downloadStats.bytes;
+  const displayedRetransmits = standard ? overallStats.retransmits : activeStats.retransmits;
+  const retransmitWarning = protocol === "tcp" && status.phase === "completed" && displayedRetransmits >= 100;
+  const displayedStatusMessage = retransmitWarning
+    ? `检测到 ${displayedRetransmits.toLocaleString("zh-CN")} 次 TCP 重传，建议检查 USB 网卡、线材或交换端口`
+    : status.message;
   const displayedBps = designPreviewTheme
     ? resultPreview
       ? downloadStats.average
@@ -462,6 +471,7 @@ export function SpeedWorkbench() {
   const valid =
     form.host.trim().length > 0 &&
     Number(form.iperfPort) > 0 &&
+    !remoteIperfPathInvalid &&
     (!sshManaged || (
       form.username.trim().length > 0 &&
       (form.authMethod === "privateKey"
@@ -475,6 +485,7 @@ export function SpeedWorkbench() {
         parallelStreams <= 32));
   const canSaveCurrentServer =
     form.host.trim().length > 0 &&
+    !remoteIperfPathInvalid &&
     (!sshManaged || (
       form.username.trim().length > 0 &&
       (form.authMethod === "privateKey"
@@ -501,6 +512,7 @@ export function SpeedWorkbench() {
         host: server.host,
         sshPort: server.sshPort.toString(),
         iperfPort: server.iperfPort.toString(),
+        remoteIperfPath: server.remoteIperfPath || "",
         serverMode: server.serverMode,
         username: server.username,
         password,
@@ -548,6 +560,7 @@ export function SpeedWorkbench() {
         host: form.host.trim(),
         sshPort: Number(form.sshPort),
         iperfPort: Number(form.iperfPort),
+        remoteIperfPath,
         serverMode: form.serverMode,
         username: form.username.trim(),
         password: savedSecret,
@@ -599,6 +612,7 @@ export function SpeedWorkbench() {
       host: form.host.trim(),
       sshPort: Number(form.sshPort),
       iperfPort: Number(form.iperfPort),
+      remoteIperfPath,
       serverMode: form.serverMode,
       username: form.username.trim(),
       password: form.password,
@@ -961,6 +975,28 @@ export function SpeedWorkbench() {
                       </motion.label>
                     )}
                   </AnimatePresence>
+                  <label className="remote-iperf-path-field">
+                    <FieldLabel icon={<Settings2 size={13} />}>远端 iperf3 路径（可选）</FieldLabel>
+                    <input
+                      className="glass-input"
+                      value={form.remoteIperfPath}
+                      disabled={busy}
+                      onChange={(event) => update("remoteIperfPath", event.target.value)}
+                      placeholder="自动检测，例如 /opt/bin/iperf3"
+                      spellCheck={false}
+                      autoComplete="off"
+                      aria-invalid={remoteIperfPathInvalid}
+                      aria-describedby="remote-iperf-path-help"
+                    />
+                    <span
+                      id="remote-iperf-path-help"
+                      className={`field-helper ${remoteIperfPathInvalid ? "is-error" : ""}`}
+                    >
+                      {remoteIperfPathInvalid
+                        ? "请填写绝对路径，例如 /opt/bin/iperf3"
+                        : "留空会自动搜索 PATH、QNAP /opt/bin 和常见 Entware 目录"}
+                    </span>
+                  </label>
                 </>
               ) : (
                 <label>
@@ -1221,9 +1257,12 @@ export function SpeedWorkbench() {
                   <span>负载延迟</span>
                   <strong>{formatLatency(overallStats.latency)}</strong>
                 </div>
-                <div className="metric-cell">
-                  <span>RTT 波动</span>
-                  <strong>{formatLatency(overallStats.jitter)}</strong>
+                <div className={`metric-cell ${retransmitWarning ? "quality-warning" : ""}`}>
+                  <span className="metric-label-with-icon">
+                    {retransmitWarning && <ShieldAlert size={12} aria-hidden="true" />}
+                    TCP 重传
+                  </span>
+                  <strong>{overallStats.retransmits.toLocaleString("zh-CN")}</strong>
                 </div>
                 <div className="metric-cell">
                   <span>总传输</span>
@@ -1248,7 +1287,7 @@ export function SpeedWorkbench() {
                   <span>{protocol === "udp" ? "UDP 抖动" : "RTT 波动"}</span>
                   <strong>{formatLatency(activeStats.jitter)}</strong>
                 </div>
-                <div className="metric-cell">
+                <div className={`metric-cell ${retransmitWarning ? "quality-warning" : ""}`}>
                   <span>{protocol === "tcp" ? "传输 / 重传" : "已传输"}</span>
                   <strong>
                     {protocol === "tcp"
@@ -1261,21 +1300,21 @@ export function SpeedWorkbench() {
           </div>
 
           <div
-            className={`status-line phase-${status.phase}`}
+            className={`status-line phase-${status.phase} ${retransmitWarning ? "has-network-warning" : ""}`}
             role="status"
             aria-live="polite"
-            title={status.message}
+            title={displayedStatusMessage}
           >
             <span className="status-pulse" />
             <AnimatePresence mode="wait" initial={false}>
               <motion.p
-                key={`${status.phase}-${status.message}`}
+                key={`${status.phase}-${displayedStatusMessage}`}
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -5 }}
                 transition={{ duration: 0.2 }}
               >
-                {status.message}
+                {displayedStatusMessage}
               </motion.p>
             </AnimatePresence>
             <span>

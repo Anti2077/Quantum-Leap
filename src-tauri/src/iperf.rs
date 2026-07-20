@@ -87,10 +87,9 @@ async fn wait_for_cancel(cancel: &mut watch::Receiver<bool>) {
 fn parse_ping_latency(line: &str) -> Option<f64> {
     let (marker, offset) = if let Some(index) = line.find("time=") {
         (index, 5)
-    } else if let Some(index) = line.find("time<") {
-        (index, 5)
     } else {
-        return None;
+        let index = line.find("time<")?;
+        (index, 5)
     };
     let value = line[marker + offset..]
         .trim_start()
@@ -415,6 +414,7 @@ mod tests {
             host: "10.0.0.8".into(),
             ssh_port: 22,
             iperf_port: 5201,
+            remote_iperf_path: String::new(),
             server_mode: ServerMode::SshManaged,
             username: "tester".into(),
             password: "secret".into(),

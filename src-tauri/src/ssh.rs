@@ -10,6 +10,16 @@ use std::{
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const SESSION_TIMEOUT_MS: u32 = 12_000;
+const REMOTE_IPERF_CANDIDATES: &[&str] = &[
+    "/opt/bin/iperf3",
+    "/usr/local/bin/iperf3",
+    "/usr/bin/iperf3",
+    "/bin/iperf3",
+    "/opt/homebrew/bin/iperf3",
+    "/share/CACHEDEV1_DATA/.qpkg/Entware/bin/iperf3",
+    "/share/MD0_DATA/.qpkg/Entware/bin/iperf3",
+    "/share/HDA_DATA/.qpkg/Entware/bin/iperf3",
+];
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SshError {
@@ -270,6 +280,51 @@ fn run_command(session: &Session, command: &str) -> Result<(String, String, i32)
     Ok((stdout, stderr, exit_status))
 }
 
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn server_start_command(remote: &RemoteTarget, one_off: bool) -> String {
+    let candidates = REMOTE_IPERF_CANDIDATES
+        .iter()
+        .map(|path| shell_quote(path))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let custom_path = shell_quote(remote.iperf_path.trim());
+    let log_path = format!("/tmp/iperf3-ui-{}.log", remote.iperf_port);
+    let one_off_flag = if one_off { "-1" } else { "" };
+    let script = format!(
+        "IPERF3_BIN={custom_path}; \
+         if [ -n \"$IPERF3_BIN\" ]; then \
+           [ -x \"$IPERF3_BIN\" ] || {{ printf 'IPERF3_PATH_INVALID:%s\\n' \"$IPERF3_BIN\" >&2; exit 126; }}; \
+         else \
+           IPERF3_BIN=$(command -v iperf3 2>/dev/null || true); \
+           if [ -z \"$IPERF3_BIN\" ] || [ ! -x \"$IPERF3_BIN\" ]; then \
+             IPERF3_BIN=; \
+             for candidate in {candidates}; do \
+               if [ -x \"$candidate\" ]; then IPERF3_BIN=$candidate; break; fi; \
+             done; \
+           fi; \
+         fi; \
+         if [ -z \"$IPERF3_BIN\" ]; then \
+           package_manager=unknown; \
+           if command -v apt-get >/dev/null 2>&1; then package_manager=apt-get; \
+           elif command -v dnf >/dev/null 2>&1; then package_manager=dnf; \
+           elif command -v yum >/dev/null 2>&1; then package_manager=yum; \
+           elif command -v apk >/dev/null 2>&1; then package_manager=apk; \
+           elif command -v pacman >/dev/null 2>&1; then package_manager=pacman; \
+           elif command -v zypper >/dev/null 2>&1; then package_manager=zypper; \
+           elif command -v brew >/dev/null 2>&1; then package_manager=brew; fi; \
+           echo IPERF3_NOT_FOUND:$package_manager >&2; exit 127; \
+         fi; \
+         nohup \"$IPERF3_BIN\" -s {one_off_flag} -p {port} >{log} 2>&1 </dev/null & pid=$!; \
+         sleep 0.25; kill -0 $pid 2>/dev/null || {{ cat {log} >&2; exit 1; }}; echo $pid",
+        port = remote.iperf_port,
+        log = shell_quote(&log_path),
+    );
+    format!("sh -lc {}", shell_quote(&script))
+}
+
 fn parse_server_start(
     stdout: &str,
     stderr: &str,
@@ -293,6 +348,15 @@ fn parse_server_start(
         return Err(SshError::ExistingServer);
     }
 
+    if let Some(path) = stderr
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("IPERF3_PATH_INVALID:"))
+    {
+        return Err(SshError::Message(format!(
+            "远端 iperf3 路径不可执行：{path}"
+        )));
+    }
+
     if stderr.contains("IPERF3_NOT_FOUND:") {
         return Err(SshError::Iperf3Missing(RemotePackageManager::from_marker(
             stderr,
@@ -313,25 +377,7 @@ pub fn start_remote_server(
     one_off: bool,
 ) -> Result<RemoteServer, SshError> {
     let session = connect(remote)?;
-    let log_path = format!("/tmp/iperf3-ui-{}.log", remote.iperf_port);
-    let one_off_flag = if one_off { "-1" } else { "" };
-    let command = format!(
-        "sh -lc 'if ! command -v iperf3 >/dev/null 2>&1; then \
-         package_manager=unknown; \
-         if command -v apt-get >/dev/null 2>&1; then package_manager=apt-get; \
-         elif command -v dnf >/dev/null 2>&1; then package_manager=dnf; \
-         elif command -v yum >/dev/null 2>&1; then package_manager=yum; \
-         elif command -v apk >/dev/null 2>&1; then package_manager=apk; \
-         elif command -v pacman >/dev/null 2>&1; then package_manager=pacman; \
-         elif command -v zypper >/dev/null 2>&1; then package_manager=zypper; \
-         elif command -v brew >/dev/null 2>&1; then package_manager=brew; fi; \
-         echo IPERF3_NOT_FOUND:$package_manager >&2; exit 127; fi; \
-         nohup iperf3 -s {one_off_flag} -p {port} >{log} 2>&1 </dev/null & pid=$!; \
-         sleep 0.25; kill -0 $pid 2>/dev/null || {{ cat {log} >&2; exit 1; }}; echo $pid'",
-        port = remote.iperf_port,
-        log = log_path,
-        one_off_flag = one_off_flag
-    );
+    let command = server_start_command(remote, one_off);
     let (stdout, stderr, status) = run_command(&session, &command)?;
     parse_server_start(&stdout, &stderr, status, reuse_existing)
 }
@@ -404,6 +450,21 @@ pub fn cleanup_remote_server(remote: &RemoteTarget, pid: u32) -> Result<(), Stri
 mod tests {
     use super::*;
 
+    fn remote(iperf_path: &str) -> RemoteTarget {
+        RemoteTarget {
+            host: "10.0.0.8".into(),
+            ssh_port: 22,
+            iperf_port: 5201,
+            iperf_path: iperf_path.into(),
+            username: "tester".into(),
+            password: "secret".into(),
+            auth_method: SshAuthMethod::Password,
+            private_key_path: String::new(),
+            passphrase: String::new(),
+            allow_host_key_mismatch: false,
+        }
+    }
+
     #[test]
     fn parses_managed_server_pid() {
         assert_eq!(
@@ -466,5 +527,34 @@ mod tests {
             .status()
             .expect("run cleanup shell")
             .success());
+    }
+
+    #[test]
+    fn quotes_custom_remote_binary_paths() {
+        assert_eq!(shell_quote("/opt/a'b/iperf3"), "'/opt/a'\"'\"'b/iperf3'");
+        let command = server_start_command(&remote("/opt/bin/iperf3"), false);
+        assert!(command.contains("/opt/bin/iperf3"));
+        assert!(command.contains("IPERF3_PATH_INVALID"));
+    }
+
+    #[test]
+    fn auto_detection_checks_qnap_and_entware_paths() {
+        let command = server_start_command(&remote(""), true);
+        assert!(command.contains("/opt/bin/iperf3"));
+        assert!(command.contains(".qpkg/Entware/bin/iperf3"));
+        assert!(command.contains("package_manager=apt-get"));
+        assert!(command.contains("IPERF3_NOT_FOUND:$package_manager"));
+        assert!(command.contains("-s -1 -p 5201"));
+    }
+
+    #[test]
+    fn reports_an_invalid_custom_binary_path() {
+        let error = parse_server_start("", "IPERF3_PATH_INVALID:/opt/bin/missing", 126, false);
+        assert_eq!(
+            error,
+            Err(SshError::Message(
+                "远端 iperf3 路径不可执行：/opt/bin/missing".into()
+            ))
+        );
     }
 }
