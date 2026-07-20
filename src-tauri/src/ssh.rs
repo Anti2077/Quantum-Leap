@@ -341,8 +341,12 @@ fn cleanup_remote_command(pid: u32, port: u16) -> String {
         "sh -lc 'pid={pid}; port={port}; \
          is_target() {{ \
            candidate=\"$1\"; \
-           [ -r \"/proc/$candidate/cmdline\" ] || return 1; \
+           if [ -r \"/proc/$candidate/cmdline\" ]; then \
            command_line=\" $(tr \"\\000\" \" \" < \"/proc/$candidate/cmdline\" 2>/dev/null) \"; \
+           else \
+             command_line=\" $(ps -p \"$candidate\" -o args= 2>/dev/null) \"; \
+           fi; \
+           [ -n \"${{command_line# }}\" ] || return 1; \
            case \"$command_line\" in *iperf3*) ;; *) return 1 ;; esac; \
            case \"$command_line\" in *\" -s \"*) ;; *) return 1 ;; esac; \
            case \"$command_line\" in *\" -p $port \"*) return 0 ;; *) return 1 ;; esac; \
@@ -454,6 +458,7 @@ mod tests {
         let command = cleanup_remote_command(u32::MAX, u16::MAX);
 
         assert!(command.contains("/proc/[0-9]*/cmdline"));
+        assert!(command.contains("ps -p \"$candidate\" -o args="));
         assert!(command.contains(" -p $port "));
         assert!(command.contains("端口 $port 仍有服务端进程"));
         assert!(std::process::Command::new("sh")

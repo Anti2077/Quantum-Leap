@@ -218,6 +218,8 @@ fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer
 
     if request.server_mode == ServerMode::SshManaged {
         keychain_set(&id, &request.password)?;
+    } else {
+        keychain_delete(&id);
     }
     if let Some(index) = existing_index {
         records[index] = metadata;
