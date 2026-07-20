@@ -29,7 +29,22 @@ impl PingMetrics {
 #[derive(Debug)]
 pub enum RunError {
     Cancelled,
+    ServerUnavailable,
     Message(String),
+}
+
+fn is_server_unavailable(detail: &str) -> bool {
+    let normalized = detail.to_ascii_lowercase();
+    [
+        "unable to connect to server",
+        "connection refused",
+        "operation timed out",
+        "connection timed out",
+        "no route to host",
+        "network is unreachable",
+    ]
+    .iter()
+    .any(|message| normalized.contains(message))
 }
 
 fn resolve_iperf3_binary() -> Result<PathBuf, String> {
@@ -237,16 +252,20 @@ pub async fn run_local_client(
             if !status.success() {
                 let stderr = stderr_task.await.unwrap_or_default();
                 let detail = stderr.trim();
-                let message = if detail.contains("unrecognized option") && detail.contains("json-stream") {
-                    "本机 iperf3 版本过旧，不支持实时 JSON；请升级到 iperf3 3.17 或更高版本".into()
+                let error = if detail.contains("unrecognized option") && detail.contains("json-stream") {
+                    RunError::Message(
+                        "本机 iperf3 版本过旧，不支持实时 JSON；请升级到 iperf3 3.17 或更高版本".into()
+                    )
+                } else if is_server_unavailable(detail) {
+                    RunError::ServerUnavailable
                 } else if detail.is_empty() {
-                    format!("iperf3 异常退出：{status}")
+                    RunError::Message(format!("iperf3 异常退出：{status}"))
                 } else {
-                    format!("iperf3 测速失败：{detail}")
+                    RunError::Message(format!("iperf3 测速失败：{detail}"))
                 };
                 let _ = stdout_task.await;
                 stop_ping(&mut ping_process).await;
-                return Err(RunError::Message(message));
+                return Err(error);
             }
             false
         }
@@ -262,6 +281,9 @@ pub async fn run_local_client(
     let stderr = stderr_task.await.unwrap_or_default();
     if sample_count == 0 {
         let detail = stderr.trim();
+        if is_server_unavailable(detail) {
+            return Err(RunError::ServerUnavailable);
+        }
         return Err(RunError::Message(if detail.is_empty() {
             "iperf3 已结束，但没有产生实时采样".into()
         } else {
@@ -427,6 +449,18 @@ mod tests {
             Some(1.0)
         );
         assert_eq!(parse_ping_latency("Request timeout for icmp_seq 4"), None);
+    }
+
+    #[test]
+    fn recognizes_unavailable_iperf3_server_errors() {
+        assert!(is_server_unavailable(
+            "iperf3: error - unable to connect to server: Connection refused"
+        ));
+        assert!(is_server_unavailable(
+            "iperf3: error - unable to connect to server: Operation timed out"
+        ));
+        assert!(is_server_unavailable("connect failed: No route to host"));
+        assert!(!is_server_unavailable("unrecognized option --json-stream"));
     }
 
     #[test]

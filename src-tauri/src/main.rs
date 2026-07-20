@@ -45,6 +45,14 @@ fn emit_state(app: &AppHandle, phase: &'static str, message: impl Into<String>) 
     );
 }
 
+fn unavailable_server_message(manages_remote: bool) -> &'static str {
+    if manages_remote {
+        "无法连接远端 iperf3 服务，请检查防火墙和测速端口"
+    } else {
+        "未检测到服务运行，请排查地址和端口"
+    }
+}
+
 fn emit_prompt(
     app: &AppHandle,
     kind: &'static str,
@@ -155,6 +163,23 @@ async fn start_speed_test(
                         "检测到已有测速服务",
                         "目标端口已有服务监听。继续将直接复用它，完成后不会终止该服务。",
                         Some(format!("{}:{}", remote.host, remote.iperf_port)),
+                    ),
+                    SshError::Iperf3Missing(package_manager) => emit_prompt(
+                        &app,
+                        "iperf3Missing",
+                        "远端未安装 iperf3",
+                        package_manager.label().map_or_else(
+                            || {
+                                "未识别到可用的包管理器，请登录服务器手动安装 iperf3 3.17 或更高版本。"
+                                    .to_string()
+                            },
+                            |label| {
+                                format!(
+                                    "已检测到 {label}。请登录服务器执行下面的命令，安装完成后重新检测。"
+                                )
+                            },
+                        ),
+                        package_manager.install_command().map(str::to_string),
                     ),
                     SshError::Message(message) => emit_state(&app, "failed", message),
                 }
@@ -279,6 +304,9 @@ async fn start_speed_test(
                     "测速已中断，已有服务保持运行"
                 },
             ),
+            (Err(RunError::ServerUnavailable), Ok(())) => {
+                emit_state(&app, "failed", unavailable_server_message(manages_remote))
+            }
             (Err(RunError::Message(error)), Ok(())) => emit_state(&app, "failed", error),
             (Ok(()), Err(error)) => emit_state(&app, "failed", error),
             (Err(RunError::Cancelled), Err(error)) => emit_state(
@@ -290,6 +318,14 @@ async fn start_speed_test(
                 &app,
                 "failed",
                 format!("{run_error}；同时远端清理失败：{cleanup_error}"),
+            ),
+            (Err(RunError::ServerUnavailable), Err(cleanup_error)) => emit_state(
+                &app,
+                "failed",
+                format!(
+                    "{}；同时远端清理失败：{cleanup_error}",
+                    unavailable_server_message(manages_remote)
+                ),
             ),
         }
 

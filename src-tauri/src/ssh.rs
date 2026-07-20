@@ -15,6 +15,7 @@ const SESSION_TIMEOUT_MS: u32 = 12_000;
 pub enum SshError {
     HostKeyMismatch(String),
     ExistingServer,
+    Iperf3Missing(RemotePackageManager),
     Message(String),
 }
 
@@ -26,6 +27,7 @@ impl std::fmt::Display for SshError {
                 "SSH 主机密钥与 known_hosts 不一致。SHA256 指纹：{fingerprint}"
             ),
             Self::ExistingServer => write!(formatter, "测速端口已有服务正在监听"),
+            Self::Iperf3Missing(_) => write!(formatter, "远端服务器未安装 iperf3"),
             Self::Message(message) => formatter.write_str(message),
         }
     }
@@ -34,6 +36,62 @@ impl std::fmt::Display for SshError {
 impl From<String> for SshError {
     fn from(message: String) -> Self {
         Self::Message(message)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RemotePackageManager {
+    Apt,
+    Dnf,
+    Yum,
+    Apk,
+    Pacman,
+    Zypper,
+    Homebrew,
+    Unknown,
+}
+
+impl RemotePackageManager {
+    fn from_marker(stderr: &str) -> Self {
+        let marker = stderr
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("IPERF3_NOT_FOUND:"));
+        match marker {
+            Some("apt-get") => Self::Apt,
+            Some("dnf") => Self::Dnf,
+            Some("yum") => Self::Yum,
+            Some("apk") => Self::Apk,
+            Some("pacman") => Self::Pacman,
+            Some("zypper") => Self::Zypper,
+            Some("brew") => Self::Homebrew,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub fn label(self) -> Option<&'static str> {
+        match self {
+            Self::Apt => Some("APT"),
+            Self::Dnf => Some("DNF"),
+            Self::Yum => Some("YUM"),
+            Self::Apk => Some("APK"),
+            Self::Pacman => Some("Pacman"),
+            Self::Zypper => Some("Zypper"),
+            Self::Homebrew => Some("Homebrew"),
+            Self::Unknown => None,
+        }
+    }
+
+    pub fn install_command(self) -> Option<&'static str> {
+        match self {
+            Self::Apt => Some("sudo apt-get update && sudo apt-get install -y iperf3"),
+            Self::Dnf => Some("sudo dnf install -y iperf3"),
+            Self::Yum => Some("sudo yum install -y iperf3"),
+            Self::Apk => Some("sudo apk add iperf3"),
+            Self::Pacman => Some("sudo pacman -S --needed iperf3"),
+            Self::Zypper => Some("sudo zypper --non-interactive install iperf3"),
+            Self::Homebrew => Some("brew install iperf3"),
+            Self::Unknown => None,
+        }
     }
 }
 
@@ -235,9 +293,13 @@ fn parse_server_start(
         return Err(SshError::ExistingServer);
     }
 
-    let detail = if stderr.contains("IPERF3_NOT_FOUND") {
-        "远端服务器未安装 iperf3".to_string()
-    } else if stderr.trim().is_empty() {
+    if stderr.contains("IPERF3_NOT_FOUND:") {
+        return Err(SshError::Iperf3Missing(RemotePackageManager::from_marker(
+            stderr,
+        )));
+    }
+
+    let detail = if stderr.trim().is_empty() {
         format!("远端 iperf3 启动失败（退出码 {status}）")
     } else {
         format!("远端 iperf3 启动失败：{}", stderr.trim())
@@ -254,7 +316,16 @@ pub fn start_remote_server(
     let log_path = format!("/tmp/iperf3-ui-{}.log", remote.iperf_port);
     let one_off_flag = if one_off { "-1" } else { "" };
     let command = format!(
-        "sh -lc 'command -v iperf3 >/dev/null 2>&1 || {{ echo IPERF3_NOT_FOUND >&2; exit 127; }}; \
+        "sh -lc 'if ! command -v iperf3 >/dev/null 2>&1; then \
+         package_manager=unknown; \
+         if command -v apt-get >/dev/null 2>&1; then package_manager=apt-get; \
+         elif command -v dnf >/dev/null 2>&1; then package_manager=dnf; \
+         elif command -v yum >/dev/null 2>&1; then package_manager=yum; \
+         elif command -v apk >/dev/null 2>&1; then package_manager=apk; \
+         elif command -v pacman >/dev/null 2>&1; then package_manager=pacman; \
+         elif command -v zypper >/dev/null 2>&1; then package_manager=zypper; \
+         elif command -v brew >/dev/null 2>&1; then package_manager=brew; fi; \
+         echo IPERF3_NOT_FOUND:$package_manager >&2; exit 127; fi; \
          nohup iperf3 -s {one_off_flag} -p {port} >{log} 2>&1 </dev/null & pid=$!; \
          sleep 0.25; kill -0 $pid 2>/dev/null || {{ cat {log} >&2; exit 1; }}; echo $pid'",
         port = remote.iperf_port,
@@ -316,5 +387,26 @@ mod tests {
             parse_server_start("", error, 1, false),
             Err(SshError::ExistingServer)
         ));
+    }
+
+    #[test]
+    fn reports_missing_iperf3_with_detected_package_manager() {
+        assert_eq!(
+            parse_server_start("", "IPERF3_NOT_FOUND:apt-get\n", 127, false),
+            Err(SshError::Iperf3Missing(RemotePackageManager::Apt))
+        );
+        assert_eq!(
+            RemotePackageManager::Apt.install_command(),
+            Some("sudo apt-get update && sudo apt-get install -y iperf3")
+        );
+    }
+
+    #[test]
+    fn reports_missing_iperf3_without_a_known_package_manager() {
+        assert_eq!(
+            parse_server_start("", "IPERF3_NOT_FOUND:unknown\n", 127, false),
+            Err(SshError::Iperf3Missing(RemotePackageManager::Unknown))
+        );
+        assert_eq!(RemotePackageManager::Unknown.install_command(), None);
     }
 }

@@ -6,11 +6,14 @@ import ArrowDownToLine from "lucide-react/dist/esm/icons/arrow-down-to-line.js";
 import ArrowUpFromLine from "lucide-react/dist/esm/icons/arrow-up-from-line.js";
 import BookMarked from "lucide-react/dist/esm/icons/book-marked.js";
 import Clock3 from "lucide-react/dist/esm/icons/clock-3.js";
+import Check from "lucide-react/dist/esm/icons/check.js";
+import Copy from "lucide-react/dist/esm/icons/copy.js";
 import FileKey2 from "lucide-react/dist/esm/icons/file-key-2.js";
 import Gauge from "lucide-react/dist/esm/icons/gauge.js";
 import KeyRound from "lucide-react/dist/esm/icons/key-round.js";
 import Layers3 from "lucide-react/dist/esm/icons/layers-3.js";
 import Network from "lucide-react/dist/esm/icons/network.js";
+import PackageSearch from "lucide-react/dist/esm/icons/package-search.js";
 import Play from "lucide-react/dist/esm/icons/play.js";
 import Plus from "lucide-react/dist/esm/icons/plus.js";
 import Radio from "lucide-react/dist/esm/icons/radio.js";
@@ -238,7 +241,14 @@ export function SpeedWorkbench() {
             message: "当前 SSH 主机密钥与已知记录不一致，请确认服务器身份后再继续。",
             detail: "SHA256:preview-host-key-fingerprint"
           }
-        : null
+        : promptPreview === "iperf3Missing"
+          ? {
+              kind: "iperf3Missing",
+              title: "远端未安装 iperf3",
+              message: "已检测到 APT。请登录服务器执行下面的命令，安装完成后重新检测。",
+              detail: "sudo apt-get update && sudo apt-get install -y iperf3"
+            }
+          : null
   );
   const [savedServers, setSavedServers] = useState<SavedServer[]>(() =>
     designPreviewTheme
@@ -251,6 +261,7 @@ export function SpeedWorkbench() {
   );
   const [savedMenuOpen, setSavedMenuOpen] = useState(false);
   const [savedBusy, setSavedBusy] = useState(false);
+  const [promptDetailCopied, setPromptDetailCopied] = useState(false);
   const [bandwidthUnit, setBandwidthUnit] = useState<BandwidthUnit>(savedBandwidthUnit);
   const [status, setStatus] = useState<SpeedStateEvent>(() =>
     designPreviewTheme
@@ -317,6 +328,7 @@ export function SpeedWorkbench() {
 
     void listen<SpeedPromptEvent>("speed://prompt", (event) => {
       if (!mounted) return;
+      setPromptDetailCopied(false);
       setPrompt(event.payload);
       setStatus({ phase: "confirming", message: event.payload.title });
     })
@@ -577,10 +589,24 @@ export function SpeedWorkbench() {
     await launch(nextRequest);
   };
 
+  const copyPromptDetail = async () => {
+    if (!prompt?.detail) return;
+    try {
+      await navigator.clipboard.writeText(prompt.detail);
+      setPromptDetailCopied(true);
+    } catch {
+      setStatus({ phase: "failed", message: "复制失败，请手动选择安装命令" });
+    }
+  };
+
   const rejectPrompt = () => {
+    const missingIperf3 = prompt?.kind === "iperf3Missing";
     setPrompt(null);
     requestRef.current = null;
-    setStatus({ phase: "cancelled", message: "已取消本次连接" });
+    setStatus({
+      phase: "cancelled",
+      message: missingIperf3 ? "测速未开始：远端缺少 iperf3" : "已取消本次连接"
+    });
   };
 
   const stop = async () => {
@@ -1195,15 +1221,33 @@ export function SpeedWorkbench() {
               transition={{ type: "spring", stiffness: 300, damping: 28 }}
             >
               <div className="confirm-icon">
-                {prompt.kind === "hostKeyMismatch" ? <ShieldAlert size={21} /> : <Server size={21} />}
+                {prompt.kind === "hostKeyMismatch" ? (
+                  <ShieldAlert size={21} />
+                ) : prompt.kind === "iperf3Missing" ? (
+                  <PackageSearch size={21} />
+                ) : (
+                  <Server size={21} />
+                )}
               </div>
               <h3 id="confirm-title">{prompt.title}</h3>
               <p>{prompt.message}</p>
               {prompt.detail && <code>{prompt.detail}</code>}
               <div className="confirm-actions">
-                <button type="button" onClick={rejectPrompt}>取消</button>
+                <button type="button" onClick={rejectPrompt}>
+                  {prompt.kind === "iperf3Missing" ? "稍后处理" : "取消"}
+                </button>
+                {prompt.kind === "iperf3Missing" && prompt.detail && (
+                  <button type="button" onClick={copyPromptDetail}>
+                    {promptDetailCopied ? <Check size={13} /> : <Copy size={13} />}
+                    {promptDetailCopied ? "已复制" : "复制命令"}
+                  </button>
+                )}
                 <button type="button" className="confirm-primary" onClick={confirmPrompt} autoFocus>
-                  {prompt.kind === "hostKeyMismatch" ? "信任并继续" : "复用并继续"}
+                  {prompt.kind === "hostKeyMismatch"
+                    ? "信任并继续"
+                    : prompt.kind === "iperf3Missing"
+                      ? "已安装，重新检测"
+                      : "复用并继续"}
                 </button>
               </div>
             </motion.div>
