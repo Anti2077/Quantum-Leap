@@ -39,7 +39,7 @@ export interface SpeedStateEvent {
 }
 
 export interface SpeedPromptEvent {
-  kind: "hostKeyMismatch" | "existingServer" | "iperf3Missing";
+  kind: "hostKeyMismatch" | "existingServer" | "iperf3Missing" | "serverUnavailable";
   title: string;
   message: string;
   detail?: string | null;

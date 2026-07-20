@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import Activity from "lucide-react/dist/esm/icons/activity.js";
 import ArrowDownToLine from "lucide-react/dist/esm/icons/arrow-down-to-line.js";
 import ArrowUpFromLine from "lucide-react/dist/esm/icons/arrow-up-from-line.js";
+import CircleAlert from "lucide-react/dist/esm/icons/circle-alert.js";
 import BookMarked from "lucide-react/dist/esm/icons/book-marked.js";
 import Clock3 from "lucide-react/dist/esm/icons/clock-3.js";
 import Check from "lucide-react/dist/esm/icons/check.js";
@@ -248,6 +249,13 @@ export function SpeedWorkbench() {
               message: "已检测到 APT。请登录服务器执行下面的命令，安装完成后重新检测。",
               detail: "sudo apt-get update && sudo apt-get install -y iperf3"
             }
+          : promptPreview === "serverUnavailable"
+            ? {
+                kind: "serverUnavailable",
+                title: "测速服务不可用",
+                message: "未检测到服务运行，请排查地址和端口。",
+                detail: "服务器地址：192.168.11.128\n测速端口：5201"
+              }
           : null
   );
   const [savedServers, setSavedServers] = useState<SavedServer[]>(() =>
@@ -370,7 +378,15 @@ export function SpeedWorkbench() {
       if (prompt) {
         setPrompt(null);
         requestRef.current = null;
-        setStatus({ phase: "cancelled", message: "已取消本次连接" });
+        setStatus({
+          phase: prompt.kind === "serverUnavailable" ? "failed" : "cancelled",
+          message:
+            prompt.kind === "serverUnavailable"
+              ? prompt.message
+              : prompt.kind === "iperf3Missing"
+                ? "测速未开始：远端缺少 iperf3"
+                : "已取消本次连接"
+        });
       } else {
         setSavedMenuOpen(false);
       }
@@ -601,11 +617,16 @@ export function SpeedWorkbench() {
 
   const rejectPrompt = () => {
     const missingIperf3 = prompt?.kind === "iperf3Missing";
+    const serverUnavailable = prompt?.kind === "serverUnavailable";
     setPrompt(null);
     requestRef.current = null;
     setStatus({
-      phase: "cancelled",
-      message: missingIperf3 ? "测速未开始：远端缺少 iperf3" : "已取消本次连接"
+      phase: serverUnavailable ? "failed" : "cancelled",
+      message: serverUnavailable
+        ? prompt?.message ?? "测速服务不可用"
+        : missingIperf3
+          ? "测速未开始：远端缺少 iperf3"
+          : "已取消本次连接"
     });
   };
 
@@ -1225,6 +1246,8 @@ export function SpeedWorkbench() {
                   <ShieldAlert size={21} />
                 ) : prompt.kind === "iperf3Missing" ? (
                   <PackageSearch size={21} />
+                ) : prompt.kind === "serverUnavailable" ? (
+                  <CircleAlert size={21} />
                 ) : (
                   <Server size={21} />
                 )}
@@ -1233,22 +1256,30 @@ export function SpeedWorkbench() {
               <p>{prompt.message}</p>
               {prompt.detail && <code>{prompt.detail}</code>}
               <div className="confirm-actions">
-                <button type="button" onClick={rejectPrompt}>
-                  {prompt.kind === "iperf3Missing" ? "稍后处理" : "取消"}
-                </button>
+                {prompt.kind !== "serverUnavailable" && (
+                  <button type="button" onClick={rejectPrompt}>
+                    {prompt.kind === "iperf3Missing" ? "稍后处理" : "取消"}
+                  </button>
+                )}
                 {prompt.kind === "iperf3Missing" && prompt.detail && (
                   <button type="button" onClick={copyPromptDetail}>
                     {promptDetailCopied ? <Check size={13} /> : <Copy size={13} />}
                     {promptDetailCopied ? "已复制" : "复制命令"}
                   </button>
                 )}
-                <button type="button" className="confirm-primary" onClick={confirmPrompt} autoFocus>
-                  {prompt.kind === "hostKeyMismatch"
-                    ? "信任并继续"
-                    : prompt.kind === "iperf3Missing"
-                      ? "已安装，重新检测"
-                      : "复用并继续"}
-                </button>
+                {prompt.kind === "serverUnavailable" ? (
+                  <button type="button" className="confirm-primary" onClick={rejectPrompt} autoFocus>
+                    关闭
+                  </button>
+                ) : (
+                  <button type="button" className="confirm-primary" onClick={confirmPrompt} autoFocus>
+                    {prompt.kind === "hostKeyMismatch"
+                      ? "信任并继续"
+                      : prompt.kind === "iperf3Missing"
+                        ? "已安装，重新检测"
+                        : "复用并继续"}
+                  </button>
+                )}
               </div>
             </motion.div>
           </motion.div>

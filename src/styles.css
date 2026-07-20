@@ -1705,6 +1705,12 @@ h2 {
   box-shadow: inset 0 0 0 1px rgba(255, 128, 102, 0.12);
 }
 
+.prompt-serverUnavailable .confirm-icon {
+  color: #ff8066;
+  background: rgba(255, 128, 102, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 128, 102, 0.12);
+}
+
 .confirm-dialog h3 {
   margin: 0 0 8px;
   color: rgba(249, 252, 251, 0.94);
@@ -1722,6 +1728,7 @@ h2 {
   display: block;
   margin-top: 15px;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
   border-radius: 12px;
   padding: 11px 12px;
   color: rgba(238, 245, 243, 0.68);

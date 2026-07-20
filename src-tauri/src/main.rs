@@ -53,6 +53,19 @@ fn unavailable_server_message(manages_remote: bool) -> &'static str {
     }
 }
 
+fn emit_server_unavailable_prompt(app: &AppHandle, manages_remote: bool, remote: &RemoteTarget) {
+    emit_prompt(
+        app,
+        "serverUnavailable",
+        "测速服务不可用",
+        unavailable_server_message(manages_remote),
+        Some(format!(
+            "服务器地址：{}\n测速端口：{}",
+            remote.host, remote.iperf_port
+        )),
+    );
+}
+
 fn emit_prompt(
     app: &AppHandle,
     kind: &'static str,
@@ -190,22 +203,33 @@ async fn start_speed_test(
         let managed = server.is_managed();
 
         if *cancel_rx.borrow() {
-            if managed {
+            let cleanup_result = if managed {
                 let remote_for_cleanup = remote.clone();
-                let _ = tauri::async_runtime::spawn_blocking(move || {
+                tauri::async_runtime::spawn_blocking(move || {
                     cleanup_remote_server(&remote_for_cleanup, pid)
                 })
-                .await;
+                .await
+                .map_err(|error| format!("清理任务异常结束：{error}"))
+                .and_then(|result| result)
+            } else {
+                Ok(())
+            };
+            match cleanup_result {
+                Ok(()) => emit_state(
+                    &app,
+                    "cancelled",
+                    if managed {
+                        "测速已中断，远端服务已清理"
+                    } else {
+                        "测速已中断，持久化服务保持运行"
+                    },
+                ),
+                Err(error) => emit_state(
+                    &app,
+                    "failed",
+                    format!("测速已中断，但远端清理失败：{error}"),
+                ),
             }
-            emit_state(
-                &app,
-                "cancelled",
-                if managed {
-                    "测速已中断，远端服务已清理"
-                } else {
-                    "测速已中断，持久化服务保持运行"
-                },
-            );
             clear_active(&active, &remote_pid);
             return;
         }
@@ -305,7 +329,7 @@ async fn start_speed_test(
                 },
             ),
             (Err(RunError::ServerUnavailable), Ok(())) => {
-                emit_state(&app, "failed", unavailable_server_message(manages_remote))
+                emit_server_unavailable_prompt(&app, manages_remote, &remote)
             }
             (Err(RunError::Message(error)), Ok(())) => emit_state(&app, "failed", error),
             (Ok(()), Err(error)) => emit_state(&app, "failed", error),
@@ -319,14 +343,10 @@ async fn start_speed_test(
                 "failed",
                 format!("{run_error}；同时远端清理失败：{cleanup_error}"),
             ),
-            (Err(RunError::ServerUnavailable), Err(cleanup_error)) => emit_state(
-                &app,
-                "failed",
-                format!(
-                    "{}；同时远端清理失败：{cleanup_error}",
-                    unavailable_server_message(manages_remote)
-                ),
-            ),
+            (Err(RunError::ServerUnavailable), Err(cleanup_error)) => {
+                emit_server_unavailable_prompt(&app, manages_remote, &remote);
+                emit_state(&app, "failed", format!("同时远端清理失败：{cleanup_error}"));
+            }
         }
 
         clear_active(&active, &remote_pid);

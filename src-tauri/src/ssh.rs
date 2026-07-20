@@ -336,18 +336,57 @@ pub fn start_remote_server(
     parse_server_start(&stdout, &stderr, status, reuse_existing)
 }
 
+fn cleanup_remote_command(pid: u32, port: u16) -> String {
+    format!(
+        "sh -lc 'pid={pid}; port={port}; \
+         is_target() {{ \
+           candidate=\"$1\"; \
+           [ -r \"/proc/$candidate/cmdline\" ] || return 1; \
+           command_line=\" $(tr \"\\000\" \" \" < \"/proc/$candidate/cmdline\" 2>/dev/null) \"; \
+           case \"$command_line\" in *iperf3*) ;; *) return 1 ;; esac; \
+           case \"$command_line\" in *\" -s \"*) ;; *) return 1 ;; esac; \
+           case \"$command_line\" in *\" -p $port \"*) return 0 ;; *) return 1 ;; esac; \
+         }}; \
+         find_targets() {{ \
+           targets=; \
+           if kill -0 \"$pid\" 2>/dev/null && is_target \"$pid\"; then \
+             targets=\"$pid\"; \
+           fi; \
+           for path in /proc/[0-9]*/cmdline; do \
+             [ -r \"$path\" ] || continue; \
+             candidate=${{path#/proc/}}; candidate=${{candidate%/cmdline}}; \
+             is_target \"$candidate\" || continue; \
+             case \" $targets \" in *\" $candidate \"*) ;; *) targets=\"$targets $candidate\" ;; esac; \
+           done; \
+         }}; \
+         find_targets; \
+         [ -n \"${{targets# }}\" ] || exit 0; \
+         for candidate in $targets; do kill -TERM \"$candidate\" 2>/dev/null || true; done; \
+         n=0; \
+         while [ \"$n\" -lt 20 ]; do \
+           find_targets; [ -z \"${{targets# }}\" ] && exit 0; \
+           sleep 0.1; n=$((n+1)); \
+         done; \
+         for candidate in $targets; do kill -KILL \"$candidate\" 2>/dev/null || true; done; \
+         n=0; \
+         while [ \"$n\" -lt 10 ]; do \
+           find_targets; [ -z \"${{targets# }}\" ] && exit 0; \
+           sleep 0.1; n=$((n+1)); \
+         done; \
+         find_targets; \
+         if [ -n \"${{targets# }}\" ]; then \
+           echo \"远端 iperf3 清理失败：端口 $port 仍有服务端进程（PID${{targets}}）\" >&2; exit 1; \
+         fi'"
+    )
+}
+
 pub fn cleanup_remote_server(remote: &RemoteTarget, pid: u32) -> Result<(), String> {
     if pid == 0 {
         return Ok(());
     }
 
     let session = connect(remote).map_err(|error| error.to_string())?;
-    let command = format!(
-        "sh -lc 'case \"$(ps -p {pid} -o comm= 2>/dev/null)\" in *iperf3*) ;; *) exit 0 ;; esac; \
-         kill -TERM {pid} >/dev/null 2>&1 || true; \
-         n=0; while kill -0 {pid} >/dev/null 2>&1 && [ $n -lt 10 ]; do sleep 0.1; n=$((n+1)); done; \
-         kill -KILL {pid} >/dev/null 2>&1 || true'"
-    );
+    let command = cleanup_remote_command(pid, remote.iperf_port);
     let (_, stderr, status) = run_command(&session, &command)?;
 
     if status == 0 {
@@ -408,5 +447,19 @@ mod tests {
             Err(SshError::Iperf3Missing(RemotePackageManager::Unknown))
         );
         assert_eq!(RemotePackageManager::Unknown.install_command(), None);
+    }
+
+    #[test]
+    fn cleanup_command_supports_procfs_and_has_valid_shell_syntax() {
+        let command = cleanup_remote_command(u32::MAX, u16::MAX);
+
+        assert!(command.contains("/proc/[0-9]*/cmdline"));
+        assert!(command.contains(" -p $port "));
+        assert!(command.contains("端口 $port 仍有服务端进程"));
+        assert!(std::process::Command::new("sh")
+            .args(["-c", &command])
+            .status()
+            .expect("run cleanup shell")
+            .success());
     }
 }
