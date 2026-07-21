@@ -7,7 +7,7 @@ use crate::ssh::{
 };
 use serde_json::Value;
 use std::{
-    env,
+    env, fs,
     io::{BufRead as _, BufReader as StdBufReader, Read as _},
     path::PathBuf,
     process::Stdio,
@@ -105,8 +105,27 @@ fn resolve_iperf3_binary() -> Result<PathBuf, String> {
 
     candidates
         .into_iter()
-        .find(|candidate| candidate.is_file())
+        .find(is_executable)
         .ok_or_else(|| "本机未找到 iperf3；请使用 Homebrew 安装，或设置 IPERF3_PATH".into())
+}
+
+fn is_executable(path: &PathBuf) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path)
+            .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+    }
+
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 async fn wait_for_cancel(cancel: &mut watch::Receiver<bool>) {
@@ -950,5 +969,28 @@ mod tests {
         );
 
         assert!(args.windows(2).any(|pair| pair == ["-t", "0"]));
+    }
+
+    #[test]
+    fn rejects_a_non_executable_iperf3_file() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("iperf3-ui-not-executable-{nonce}"));
+        std::fs::write(&path, b"not an executable").expect("create temporary file");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&path)
+                .expect("read file metadata")
+                .permissions();
+            permissions.set_mode(0o600);
+            std::fs::set_permissions(&path, permissions).expect("set file permissions");
+        }
+
+        assert!(!is_executable(&path));
+        let _ = std::fs::remove_file(path);
     }
 }

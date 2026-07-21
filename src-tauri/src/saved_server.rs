@@ -4,12 +4,13 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
+    sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager};
 
 #[cfg(target_os = "macos")]
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 
 #[cfg(target_os = "macos")]
 use security_framework::passwords::{
@@ -20,6 +21,10 @@ const KEYCHAIN_SERVICE: &str = "com.anti2077.quantumleap.saved-server";
 const KEYCHAIN_VAULT_ACCOUNT: &str = "credential-vault-v1";
 const KEYCHAIN_ITEM_NOT_FOUND: i32 = -25300;
 const METADATA_FILE: &str = "saved-servers.json";
+
+// Serialize read-modify-write operations so concurrent commands cannot lose a
+// saved endpoint or race on the shared temporary metadata file.
+static METADATA_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 struct CredentialVault {
@@ -252,6 +257,9 @@ fn password_inner(app: &AppHandle, request: DeleteServerRequest) -> Result<Strin
 }
 
 fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer, String> {
+    let _metadata_guard = METADATA_LOCK
+        .lock()
+        .map_err(|_| "常用服务器存储状态不可用".to_string())?;
     let note = request.note.trim().to_owned();
     let host = request.host.trim().to_owned();
     let username = request.username.trim().to_owned();
@@ -343,6 +351,9 @@ fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer
 }
 
 fn delete_inner(app: &AppHandle, request: DeleteServerRequest) -> Result<(), String> {
+    let _metadata_guard = METADATA_LOCK
+        .lock()
+        .map_err(|_| "常用服务器存储状态不可用".to_string())?;
     let path = metadata_path(app)?;
     let mut records = read_metadata(&path)?;
     records.retain(|record| record.id != request.id);

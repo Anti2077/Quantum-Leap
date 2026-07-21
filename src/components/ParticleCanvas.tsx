@@ -6,6 +6,9 @@ type BorderMode = "border" | "link" | "idle";
 type FanDestination = "field" | "border";
 
 const BORDER_DIFFUSION_RATIO = 0.1;
+const TRAIL_CAPACITY = 22;
+const IDLE_FRAME_INTERVAL_MS = 1000 / 30;
+const REDUCED_MOTION_FRAME_INTERVAL_MS = 1000 / 12;
 
 interface Particle {
   mode: ParticleMode;
@@ -31,7 +34,7 @@ interface Particle {
   fanDestination: FanDestination;
   borderPosition: number;
   borderBranch: 1 | -1;
-  trail: Point[];
+  trail: Trail;
 }
 
 interface BorderParticle {
@@ -47,7 +50,7 @@ interface BorderParticle {
   seed: number;
   bandOffset: number;
   wait: number;
-  trail: Point[];
+  trail: Trail;
 }
 
 interface Point {
@@ -58,6 +61,16 @@ interface Point {
 interface PathPoint extends Point {
   nx: number;
   ny: number;
+}
+
+interface BorderPathPoint extends PathPoint {
+  length: number;
+}
+
+interface Trail {
+  coordinates: Float32Array;
+  start: number;
+  length: number;
 }
 
 interface Rect {
@@ -75,7 +88,73 @@ function approach(current: number, target: number, speed: number, delta: number)
   return current + (target - current) * (1 - Math.exp(-speed * delta));
 }
 
-function roundedBorderPoint(position: number, rect: Rect, portalY: number, branch: 1 | -1) {
+function createTrail(): Trail {
+  return {
+    coordinates: new Float32Array(TRAIL_CAPACITY * 2),
+    start: 0,
+    length: 0
+  };
+}
+
+function clearTrail(trail: Trail) {
+  trail.start = 0;
+  trail.length = 0;
+}
+
+function trimTrail(trail: Trail, limit: number) {
+  if (trail.length <= limit) return;
+  trail.start = (trail.start + trail.length - limit) % TRAIL_CAPACITY;
+  trail.length = limit;
+}
+
+function updateTrail(trail: Trail, x: number, y: number, limit = 16) {
+  const boundedLimit = Math.min(TRAIL_CAPACITY, Math.max(1, limit));
+  if (trail.length > 0) {
+    const previousIndex = ((trail.start + trail.length - 1) % TRAIL_CAPACITY) * 2;
+    if (
+      Math.hypot(
+        x - trail.coordinates[previousIndex],
+        y - trail.coordinates[previousIndex + 1]
+      ) > 48
+    ) {
+      clearTrail(trail);
+    }
+  }
+  trimTrail(trail, boundedLimit);
+
+  let writeIndex: number;
+  if (trail.length < boundedLimit) {
+    writeIndex = (trail.start + trail.length) % TRAIL_CAPACITY;
+    trail.length += 1;
+  } else {
+    trail.start = (trail.start + 1) % TRAIL_CAPACITY;
+    writeIndex = (trail.start + trail.length - 1) % TRAIL_CAPACITY;
+  }
+  const coordinateIndex = writeIndex * 2;
+  trail.coordinates[coordinateIndex] = x;
+  trail.coordinates[coordinateIndex + 1] = y;
+}
+
+function copyTrailTail(source: Trail, target: Trail, count: number) {
+  const copyCount = Math.min(count, source.length);
+  target.start = 0;
+  target.length = copyCount;
+  for (let index = 0; index < copyCount; index += 1) {
+    const sourceIndex =
+      ((source.start + source.length - copyCount + index) % TRAIL_CAPACITY) * 2;
+    const targetIndex = index * 2;
+    target.coordinates[targetIndex] = source.coordinates[sourceIndex];
+    target.coordinates[targetIndex + 1] = source.coordinates[sourceIndex + 1];
+  }
+}
+
+function roundedBorderPoint(
+  position: number,
+  rect: Rect,
+  portalY: number,
+  branch: 1 | -1,
+  output: BorderPathPoint
+) {
   const inset = 3;
   const left = rect.left + inset;
   const right = rect.left + rect.width - inset;
@@ -139,7 +218,12 @@ function roundedBorderPoint(position: number, rect: Rect, portalY: number, branc
     }
   }
 
-  return { x, y, nx: -ty, ny: tx, length: total };
+  output.x = x;
+  output.y = y;
+  output.nx = -ty;
+  output.ny = tx;
+  output.length = total;
+  return output;
 }
 
 function ParticleCanvasComponent({
@@ -180,20 +264,32 @@ function ParticleCanvasComponent({
     let particleReleaseClock = 0;
     let particles: Particle[] = [];
     let borderParticles: BorderParticle[] = [];
+    let pageVisible = !document.hidden;
+    let wasEnergized = activeMix > 0.035;
+    const gatherPoint: PathPoint = { x: 0, y: 0, nx: 0, ny: 1 };
+    const nextGatherPoint: PathPoint = { x: 0, y: 0, nx: 0, ny: 1 };
+    const pathPoint: PathPoint = { x: 0, y: 0, nx: 0, ny: 1 };
+    const borderPoint: BorderPathPoint = { x: 0, y: 0, nx: 0, ny: 1, length: 1 };
 
-    const pathPointAt = (points: PathPoint[], progress: number) => {
+    const pathPointAt = (points: PathPoint[], progress: number, output: PathPoint) => {
+      if (points.length === 0) {
+        output.x = 0;
+        output.y = portalY;
+        output.nx = 0;
+        output.ny = 1;
+        return output;
+      }
       const bounded = Math.min(1, Math.max(0, progress));
       const scaled = bounded * Math.max(0, points.length - 1);
       const index = Math.min(points.length - 1, Math.floor(scaled));
-      const next = points[Math.min(points.length - 1, index + 1)] ?? points[index];
-      const current = points[index] ?? { x: 0, y: portalY, nx: 0, ny: 1 };
+      const next = points[Math.min(points.length - 1, index + 1)];
+      const current = points[index];
       const amount = scaled - index;
-      return {
-        x: current.x + (next.x - current.x) * amount,
-        y: current.y + (next.y - current.y) * amount,
-        nx: current.nx + (next.nx - current.nx) * amount,
-        ny: current.ny + (next.ny - current.ny) * amount
-      };
+      output.x = current.x + (next.x - current.x) * amount;
+      output.y = current.y + (next.y - current.y) * amount;
+      output.nx = current.nx + (next.nx - current.nx) * amount;
+      output.ny = current.ny + (next.ny - current.ny) * amount;
+      return output;
     };
 
     const placeFieldParticle = (particle: Particle, resetTrail = true) => {
@@ -210,7 +306,7 @@ function ParticleCanvasComponent({
       particle.vy = random(-7, 7);
       particle.age = 0;
       particle.maxAge = random(3.4, 6.4);
-      if (resetTrail) particle.trail.length = 0;
+      if (resetTrail) clearTrail(particle.trail);
     };
 
     const placeLinkParticle = (particle: Particle, progress: number, resetTrail = true) => {
@@ -218,7 +314,7 @@ function ParticleCanvasComponent({
       particle.t = progress;
       particle.tVelocity = 0;
       particle.age = 0;
-      if (resetTrail) particle.trail.length = 0;
+      if (resetTrail) clearTrail(particle.trail);
     };
 
     const createParticle = () => {
@@ -246,7 +342,7 @@ function ParticleCanvasComponent({
         fanDestination: "field",
         borderPosition: 0,
         borderBranch: 1,
-        trail: []
+        trail: createTrail()
       };
       placeFieldParticle(particle);
       particle.age = random(0, particle.maxAge);
@@ -266,7 +362,7 @@ function ParticleCanvasComponent({
       seed: random(0, Math.PI * 2),
       bandOffset: (Math.random() > 0.5 ? 1 : -1) * random(5.2, 10.2),
       wait: 0,
-      trail: []
+      trail: createTrail()
     });
 
     const withNormals = (raw: Point[]) => raw.map((point, index) => {
@@ -299,8 +395,12 @@ function ParticleCanvasComponent({
       fieldEnd?: Point,
       borderEntry?: { position: number; branch: 1 | -1 }
     ) => {
-      const gather = pathPointAt(cablePathPoints, fieldGatherProgress);
-      const next = pathPointAt(cablePathPoints, Math.min(1, fieldGatherProgress + 0.012));
+      const gather = pathPointAt(cablePathPoints, fieldGatherProgress, gatherPoint);
+      const next = pathPointAt(
+        cablePathPoints,
+        Math.min(1, fieldGatherProgress + 0.012),
+        nextGatherPoint
+      );
       const rawTangentX = next.x - gather.x;
       const rawTangentY = next.y - gather.y;
       const rawTangentLength = Math.max(0.001, Math.hypot(rawTangentX, rawTangentY));
@@ -315,7 +415,13 @@ function ParticleCanvasComponent({
       };
       const angle = (particle.scatterY - 0.5) * Math.PI * 0.86;
       const borderEnd = borderEntry
-        ? roundedBorderPoint(borderEntry.position, remoteRect, portalY, borderEntry.branch)
+        ? roundedBorderPoint(borderEntry.position, remoteRect, portalY, borderEntry.branch, {
+            x: 0,
+            y: 0,
+            nx: 0,
+            ny: 1,
+            length: 1
+          })
         : null;
       const end =
         borderEnd ??
@@ -351,7 +457,7 @@ function ParticleCanvasComponent({
       particle.borderBranch = borderEntry?.branch ?? 1;
       particle.fanT = fieldEnd && !borderEntry ? 1 + random(0, 0.28) : 0;
       particle.fanVelocity = 0;
-      if (particle.trail.length > 8) particle.trail.splice(0, particle.trail.length - 8);
+      trimTrail(particle.trail, 8);
     };
 
     const finishFanAsField = (particle: Particle) => {
@@ -382,7 +488,7 @@ function ParticleCanvasComponent({
       borderParticle.alpha = particle.alpha;
       borderParticle.seed = particle.seed;
       borderParticle.wait = 0;
-      borderParticle.trail = particle.trail.slice(-6);
+      copyTrailTail(particle.trail, borderParticle.trail, 6);
       placeFieldParticle(particle);
       particle.age = random(0, particle.maxAge * 0.45);
       return true;
@@ -468,6 +574,8 @@ function ParticleCanvasComponent({
       canvas.width = Math.round(width * ratio);
       canvas.height = Math.round(height * ratio);
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      context.lineCap = "round";
+      context.lineJoin = "round";
       sampleCablePath(hostBounds);
 
       if (particles.length) {
@@ -513,35 +621,48 @@ function ParticleCanvasComponent({
       const movementScale = 1.08 + speedMix * 0.92;
       const particleInterval = Math.max(0.045, Math.min(0.12, 1 / (0.46 * movementScale * particleTarget)));
       particleReleaseClock = Math.min(particleInterval * 1.1, particleReleaseClock + delta * activeMix);
-      if (
-        particleReleaseClock >= particleInterval &&
-        particles.filter((particle) => particle.mode === "link").length < particleTarget
-      ) {
-        const candidate = particles
-          .filter((particle) => particle.mode === "field")
-          .sort((left, right) => right.age / right.maxAge - left.age / left.maxAge)[0];
-        if (candidate) {
-          placeLinkParticle(candidate, 0);
-          particleReleaseClock -= particleInterval;
+      if (particleReleaseClock < particleInterval) return;
+
+      let linkCount = 0;
+      let candidate: Particle | null = null;
+      let candidateAge = -1;
+      for (const particle of particles) {
+        if (particle.mode === "link") {
+          linkCount += 1;
+        } else if (particle.mode === "field") {
+          const normalizedAge = particle.age / particle.maxAge;
+          if (normalizedAge > candidateAge) {
+            candidate = particle;
+            candidateAge = normalizedAge;
+          }
         }
+      }
+
+      if (linkCount < particleTarget && candidate) {
+        placeLinkParticle(candidate, 0);
+        particleReleaseClock -= particleInterval;
+      } else {
+        // Avoid rescanning the full pool every frame while the link is saturated.
+        particleReleaseClock = 0;
       }
     };
 
-    const updateTrail = (trail: Point[], x: number, y: number, limit = 16) => {
-      const previous = trail.at(-1);
-      if (previous && Math.hypot(x - previous.x, y - previous.y) > 48) trail.length = 0;
-      trail.push({ x, y });
-      while (trail.length > limit) trail.shift();
-    };
-
-    const drawTrail = (trail: Point[], size: number, alpha: number, enabled: boolean) => {
-      if (!enabled || reduceMotion || trail.length < 3) return;
-      context.lineCap = "round";
-      context.lineJoin = "round";
+    const drawTrail = (trail: Trail, size: number, alpha: number) => {
+      if (trail.length < 3) return;
+      let bufferIndex = trail.start;
+      let coordinateIndex = bufferIndex * 2;
       context.beginPath();
-      context.moveTo(trail[0].x, trail[0].y);
+      context.moveTo(
+        trail.coordinates[coordinateIndex],
+        trail.coordinates[coordinateIndex + 1]
+      );
       for (let index = 1; index < trail.length; index += 1) {
-        context.lineTo(trail[index].x, trail[index].y);
+        bufferIndex = bufferIndex + 1 === TRAIL_CAPACITY ? 0 : bufferIndex + 1;
+        coordinateIndex = bufferIndex * 2;
+        context.lineTo(
+          trail.coordinates[coordinateIndex],
+          trail.coordinates[coordinateIndex + 1]
+        );
       }
       context.lineWidth = Math.max(1.6, size * 2.3);
       context.strokeStyle = lightTheme
@@ -550,10 +671,20 @@ function ParticleCanvasComponent({
       context.stroke();
 
       const coreStart = Math.floor(trail.length * 0.46);
+      bufferIndex = (trail.start + coreStart) % TRAIL_CAPACITY;
+      coordinateIndex = bufferIndex * 2;
       context.beginPath();
-      context.moveTo(trail[coreStart].x, trail[coreStart].y);
+      context.moveTo(
+        trail.coordinates[coordinateIndex],
+        trail.coordinates[coordinateIndex + 1]
+      );
       for (let index = coreStart + 1; index < trail.length; index += 1) {
-        context.lineTo(trail[index].x, trail[index].y);
+        bufferIndex = bufferIndex + 1 === TRAIL_CAPACITY ? 0 : bufferIndex + 1;
+        coordinateIndex = bufferIndex * 2;
+        context.lineTo(
+          trail.coordinates[coordinateIndex],
+          trail.coordinates[coordinateIndex + 1]
+        );
       }
       context.lineWidth = Math.max(1.05, size * 1.38);
       context.strokeStyle = lightTheme
@@ -580,16 +711,39 @@ function ParticleCanvasComponent({
     };
 
     const tick = (time: number) => {
-      const delta = Math.min(0.034, Math.max(0.001, (time - previousTime) / 1000));
+      // Pause the render loop while the window is backgrounded; resume on the
+      // next frame after it becomes visible so elapsed motion does not jump.
+      if (!pageVisible) {
+        frame = 0;
+        return;
+      }
+      const targetActive = animationState.current.active;
+      // Keep tests fluid while lowering redraw cost for idle and reduced-motion states.
+      const minimumFrameInterval = reduceMotion
+        ? REDUCED_MOTION_FRAME_INTERVAL_MS
+        : targetActive || activeMix > 0.08
+          ? 0
+          : IDLE_FRAME_INTERVAL_MS;
+      if (minimumFrameInterval > 0 && time - previousTime < minimumFrameInterval) {
+        frame = requestAnimationFrame(tick);
+        return;
+      }
+
+      const delta = Math.min(reduceMotion ? 0.1 : 0.034, Math.max(0.001, (time - previousTime) / 1000));
       previousTime = time;
-      const targetActive = animationState.current.active ? 1 : 0;
+      const targetActiveMix = targetActive ? 1 : 0;
       const targetFlow = animationState.current.direction === "upload" ? 1 : -1;
       const targetSpeed = Math.min(1, Math.max(0, animationState.current.intensity));
-      activeMix = approach(activeMix, targetActive, targetActive ? 3.8 : 0.9, delta);
+      activeMix = approach(activeMix, targetActiveMix, targetActive ? 3.8 : 0.9, delta);
       flow = approach(flow, targetFlow, 2.25, delta);
       speedMix = approach(speedMix, targetSpeed, 2.4, delta);
       releaseUploadParticles(delta);
       const energized = activeMix > 0.035;
+      if (!reduceMotion && energized && !wasEnergized) {
+        particles.forEach((particle) => clearTrail(particle.trail));
+        borderParticles.forEach((particle) => clearTrail(particle.trail));
+      }
+      wasEnergized = energized;
       const flowStrength = Math.abs(flow) * activeMix;
       const movementScale = 1.08 + speedMix * 0.92;
 
@@ -670,15 +824,17 @@ function ParticleCanvasComponent({
           particle.fanVelocity = approach(particle.fanVelocity, targetVelocity, 3.2, delta);
           particle.fanT += particle.fanVelocity * delta;
           const fanProgress = Math.min(1, Math.max(0, particle.fanT));
-          const current = cubicPoint(
-            particle.fanStart,
-            particle.fanControlA,
-            particle.fanControlB,
-            particle.fanEnd,
-            fanProgress
-          );
-          drawX = current.x;
-          drawY = current.y;
+          const inverse = 1 - fanProgress;
+          drawX =
+            inverse ** 3 * particle.fanStart.x +
+            3 * inverse ** 2 * fanProgress * particle.fanControlA.x +
+            3 * inverse * fanProgress ** 2 * particle.fanControlB.x +
+            fanProgress ** 3 * particle.fanEnd.x;
+          drawY =
+            inverse ** 3 * particle.fanStart.y +
+            3 * inverse ** 2 * fanProgress * particle.fanControlA.y +
+            3 * inverse * fanProgress ** 2 * particle.fanControlB.y +
+            fanProgress ** 3 * particle.fanEnd.y;
 
           if (particle.fanT >= 1 && particle.fanVelocity > 0) {
             if (particle.fanDestination === "border" && finishFanAsBorder(particle)) return;
@@ -695,7 +851,7 @@ function ParticleCanvasComponent({
           const targetVelocity = flow * activeMix * cruise;
           particle.tVelocity = approach(particle.tVelocity, targetVelocity, 3.4, delta);
           particle.t += particle.tVelocity * delta;
-          const current = pathPointAt(cablePathPoints, particle.t);
+          const current = pathPointAt(cablePathPoints, particle.t, pathPoint);
           drawX = current.x + current.nx * particle.bandOffset;
           drawY = current.y + current.ny * particle.bandOffset;
 
@@ -721,8 +877,10 @@ function ParticleCanvasComponent({
         const visibility = particle.mode === "link" ? activeMix : 0.62 + activeMix * 0.38;
         const alpha = particle.alpha * shimmer * visibility;
         const fanTrail = particle.mode === "fan";
-        updateTrail(particle.trail, drawX, drawY, fanTrail ? 22 : 16);
-        drawTrail(particle.trail, particle.size, fanTrail ? alpha * 0.72 : alpha, energized);
+        if (!reduceMotion && energized) {
+          updateTrail(particle.trail, drawX, drawY, fanTrail ? 22 : 16);
+          drawTrail(particle.trail, particle.size, fanTrail ? alpha * 0.72 : alpha);
+        }
         drawHead(drawX, drawY, particle.size, alpha, energized);
       });
 
@@ -736,14 +894,20 @@ function ParticleCanvasComponent({
             particle.mode = "border";
             particle.position = 1;
             particle.velocity = 0;
-            particle.trail.length = 0;
+            clearTrail(particle.trail);
           } else {
             return;
           }
         }
 
         if (particle.mode === "border") {
-          const route = roundedBorderPoint(particle.position, remoteRect, portalY, particle.branch);
+          const route = roundedBorderPoint(
+            particle.position,
+            remoteRect,
+            portalY,
+            particle.branch,
+            borderPoint
+          );
           if (!reduceMotion) {
             const pixelsPerSecond = (20 + flowStrength * 115) * movementScale;
             const targetVelocity = flow * flowStrength * pixelsPerSecond / Math.max(1, route.length);
@@ -754,18 +918,24 @@ function ParticleCanvasComponent({
               particle.mode = "idle";
               particle.position = 1;
               particle.wait = random(0.12, 0.72);
-              particle.trail.length = 0;
+              clearTrail(particle.trail);
             } else if (particle.position <= 0 && particle.velocity < 0) {
               particle.mode = "link";
               particle.position = 0;
               particle.t = 1;
               particle.tVelocity = 0;
-              if (particle.trail.length > 6) particle.trail.splice(0, particle.trail.length - 6);
+              trimTrail(particle.trail, 6);
             }
           }
 
           if (particle.mode === "border") {
-            const current = roundedBorderPoint(particle.position, remoteRect, portalY, particle.branch);
+            const current = roundedBorderPoint(
+              particle.position,
+              remoteRect,
+              portalY,
+              particle.branch,
+              borderPoint
+            );
             drawX = current.x;
             drawY = current.y;
           }
@@ -778,7 +948,7 @@ function ParticleCanvasComponent({
             particle.tVelocity = approach(particle.tVelocity, targetVelocity, 3.4, delta);
             particle.t += particle.tVelocity * delta;
           }
-          const current = pathPointAt(cablePathPoints, particle.t);
+          const current = pathPointAt(cablePathPoints, particle.t, pathPoint);
           const laneMix = Math.min(1, Math.max(0, (1 - particle.t) * 4));
           drawX = current.x + current.nx * particle.bandOffset * laneMix;
           drawY = current.y + current.ny * particle.bandOffset * laneMix;
@@ -792,7 +962,7 @@ function ParticleCanvasComponent({
             particle.primed = false;
             particle.position = 1;
             particle.wait = random(0.12, 0.72);
-            particle.trail.length = 0;
+            clearTrail(particle.trail);
             return;
           }
         }
@@ -800,8 +970,10 @@ function ParticleCanvasComponent({
         const shimmer = 0.76 + Math.sin(time * 0.002 + particle.seed) * 0.24;
         const visibility = particle.mode === "link" ? activeMix : 0.58 + activeMix * 0.42;
         const alpha = particle.alpha * shimmer * visibility;
-        updateTrail(particle.trail, drawX, drawY);
-        drawTrail(particle.trail, particle.size, alpha, energized);
+        if (!reduceMotion && energized) {
+          updateTrail(particle.trail, drawX, drawY);
+          drawTrail(particle.trail, particle.size, alpha);
+        }
         drawHead(drawX, drawY, particle.size, alpha, energized);
       });
 
@@ -809,13 +981,23 @@ function ParticleCanvasComponent({
       frame = requestAnimationFrame(tick);
     };
 
+    const handleVisibilityChange = () => {
+      pageVisible = !document.hidden;
+      if (pageVisible && frame === 0) {
+        previousTime = performance.now();
+        frame = requestAnimationFrame(tick);
+      }
+    };
+
     const observer = new ResizeObserver(rebuild);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     observer.observe(host);
     rebuild();
     tick(performance.now());
 
     return () => {
       observer.disconnect();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       cancelAnimationFrame(frame);
     };
   }, []);
