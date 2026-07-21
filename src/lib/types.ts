@@ -8,6 +8,7 @@ export interface SpeedTestRequest {
   host: string;
   sshPort: number;
   iperfPort: number;
+  remoteIperfPath: string;
   serverMode: ServerMode;
   username: string;
   password: string;
@@ -51,6 +52,7 @@ export interface SavedServer {
   host: string;
   sshPort: number;
   iperfPort: number;
+  remoteIperfPath: string;
   serverMode: ServerMode;
   username: string;
   password: string;
@@ -64,6 +66,7 @@ export interface SaveServerRequest {
   host: string;
   sshPort: number;
   iperfPort: number;
+  remoteIperfPath: string;
   serverMode: ServerMode;
   username: string;
   password: string;

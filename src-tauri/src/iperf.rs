@@ -20,6 +20,12 @@ struct PingMetrics {
     updated_at: Option<Instant>,
 }
 
+#[derive(Default)]
+struct ClientOutput {
+    sample_count: u32,
+    error: Option<String>,
+}
+
 impl PingMetrics {
     fn fresh_values(&self) -> Option<(f64, Option<f64>)> {
         self.updated_at
@@ -51,6 +57,21 @@ fn is_server_unavailable(detail: &str) -> bool {
 
 fn should_report_server_unavailable(request: &SpeedTestRequest, detail: &str) -> bool {
     request.server_mode == ServerMode::Existing || is_server_unavailable(detail)
+}
+
+fn parse_error_line(line: &str) -> Option<String> {
+    let root = serde_json::from_str::<Value>(line).ok()?;
+    if root.get("event").and_then(Value::as_str) != Some("error") {
+        return None;
+    }
+    let data = root.get("data")?;
+    let detail = data.as_str().or_else(|| {
+        data.get("message")
+            .or_else(|| data.get("error"))
+            .and_then(Value::as_str)
+    })?;
+    let detail = detail.trim();
+    (!detail.is_empty()).then(|| detail.to_owned())
 }
 
 fn resolve_iperf3_binary() -> Result<PathBuf, String> {
@@ -87,10 +108,9 @@ async fn wait_for_cancel(cancel: &mut watch::Receiver<bool>) {
 fn parse_ping_latency(line: &str) -> Option<f64> {
     let (marker, offset) = if let Some(index) = line.find("time=") {
         (index, 5)
-    } else if let Some(index) = line.find("time<") {
-        (index, 5)
     } else {
-        return None;
+        let index = line.find("time<")?;
+        (index, 5)
     };
     let value = line[marker + offset..]
         .trim_start()
@@ -223,7 +243,7 @@ pub async fn run_local_client(
     let app_for_output = app.clone();
     let stdout_task = tauri::async_runtime::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
-        let mut sample_count = 0_u32;
+        let mut output = ClientOutput::default();
         let mut previous_latency_ms = None;
         while let Ok(Some(line)) = lines.next_line().await {
             if let Some(mut sample) = parse_sample(&line, direction) {
@@ -234,11 +254,13 @@ pub async fn run_local_client(
                     }
                 }
                 add_tcp_latency_jitter(&mut sample, &mut previous_latency_ms);
-                sample_count += 1;
+                output.sample_count += 1;
                 let _ = app_for_output.emit("speed://sample", sample);
+            } else if let Some(error) = parse_error_line(&line) {
+                output.error = Some(error);
             }
         }
-        sample_count
+        output
     });
     let stderr_task = tauri::async_runtime::spawn(async move {
         let mut output = String::new();
@@ -257,7 +279,12 @@ pub async fn run_local_client(
                 .map_err(|err| RunError::Message(format!("等待本地 iperf3 退出失败：{err}")))?;
             if !status.success() {
                 let stderr = stderr_task.await.unwrap_or_default();
-                let detail = stderr.trim();
+                let stdout = stdout_task.await.unwrap_or_default();
+                let detail = if stderr.trim().is_empty() {
+                    stdout.error.as_deref().unwrap_or_default()
+                } else {
+                    stderr.trim()
+                };
                 let error = if detail.contains("unrecognized option") && detail.contains("json-stream") {
                     RunError::Message(
                         "本机 iperf3 版本过旧，不支持实时 JSON；请升级到 iperf3 3.17 或更高版本".into()
@@ -269,7 +296,6 @@ pub async fn run_local_client(
                 } else {
                     RunError::Message(format!("iperf3 测速失败：{detail}"))
                 };
-                let _ = stdout_task.await;
                 stop_ping(&mut ping_process).await;
                 return Err(error);
             }
@@ -278,15 +304,19 @@ pub async fn run_local_client(
     };
 
     stop_ping(&mut ping_process).await;
-    let sample_count = stdout_task.await.unwrap_or_default();
+    let stdout = stdout_task.await.unwrap_or_default();
     if cancelled {
         let _ = stderr_task.await;
         return Err(RunError::Cancelled);
     }
 
     let stderr = stderr_task.await.unwrap_or_default();
-    if sample_count == 0 {
-        let detail = stderr.trim();
+    if stdout.sample_count == 0 {
+        let detail = if stderr.trim().is_empty() {
+            stdout.error.as_deref().unwrap_or_default()
+        } else {
+            stderr.trim()
+        };
         if should_report_server_unavailable(request, detail) {
             return Err(RunError::ServerUnavailable);
         }
@@ -415,6 +445,7 @@ mod tests {
             host: "10.0.0.8".into(),
             ssh_port: 22,
             iperf_port: 5201,
+            remote_iperf_path: String::new(),
             server_mode: ServerMode::SshManaged,
             username: "tester".into(),
             password: "secret".into(),
@@ -467,6 +498,16 @@ mod tests {
         ));
         assert!(is_server_unavailable("connect failed: No route to host"));
         assert!(!is_server_unavailable("unrecognized option --json-stream"));
+    }
+
+    #[test]
+    fn parses_json_stream_error_events() {
+        let line = r#"{"event":"error","data":"unable to connect to server: Connection refused"}"#;
+        assert_eq!(
+            parse_error_line(line).as_deref(),
+            Some("unable to connect to server: Connection refused")
+        );
+        assert!(parse_error_line(r#"{"event":"end","data":{}}"#).is_none());
     }
 
     #[test]

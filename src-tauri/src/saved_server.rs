@@ -1,4 +1,4 @@
-use crate::model::{ServerMode, SshAuthMethod};
+use crate::model::{validate_remote_iperf_path, ServerMode, SshAuthMethod};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -24,6 +24,8 @@ pub struct SaveServerRequest {
     pub host: String,
     pub ssh_port: u16,
     pub iperf_port: u16,
+    #[serde(default)]
+    pub remote_iperf_path: String,
     pub server_mode: ServerMode,
     pub username: String,
     pub password: String,
@@ -46,6 +48,8 @@ struct SavedServerMetadata {
     host: String,
     ssh_port: u16,
     iperf_port: u16,
+    #[serde(default)]
+    remote_iperf_path: String,
     #[serde(default = "default_server_mode")]
     server_mode: ServerMode,
     username: String,
@@ -71,6 +75,7 @@ pub struct SavedServer {
     host: String,
     ssh_port: u16,
     iperf_port: u16,
+    remote_iperf_path: String,
     server_mode: ServerMode,
     username: String,
     password: String,
@@ -144,6 +149,7 @@ fn list_inner(app: &AppHandle) -> Result<Vec<SavedServer>, String> {
                 host: record.host,
                 ssh_port: record.ssh_port,
                 iperf_port: record.iperf_port,
+                remote_iperf_path: record.remote_iperf_path,
                 server_mode: record.server_mode,
                 username: record.username,
                 // Passwords are unlocked lazily so launching the app never causes
@@ -179,6 +185,9 @@ fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer
     }
     if request.server_mode == ServerMode::SshManaged && username.is_empty() {
         return Err("SSH 模式需要填写用户名".into());
+    }
+    if request.server_mode == ServerMode::SshManaged {
+        validate_remote_iperf_path(&request.remote_iperf_path)?;
     }
     if request.server_mode == ServerMode::SshManaged
         && request.auth_method == SshAuthMethod::Password
@@ -221,6 +230,7 @@ fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer
         host: host.clone(),
         ssh_port: request.ssh_port,
         iperf_port: request.iperf_port,
+        remote_iperf_path: request.remote_iperf_path.trim().to_owned(),
         server_mode: request.server_mode,
         username: username.clone(),
         auth_method: request.auth_method,
@@ -245,6 +255,7 @@ fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer
         host,
         ssh_port: request.ssh_port,
         iperf_port: request.iperf_port,
+        remote_iperf_path: request.remote_iperf_path.trim().to_owned(),
         server_mode: request.server_mode,
         username,
         password: request.password,
@@ -313,6 +324,7 @@ mod tests {
             host: "10.0.0.8".into(),
             ssh_port: 22,
             iperf_port: 5201,
+            remote_iperf_path: "/opt/bin/iperf3".into(),
             server_mode: ServerMode::SshManaged,
             username: "tester".into(),
             auth_method: SshAuthMethod::Password,
@@ -325,6 +337,7 @@ mod tests {
 
         assert_eq!(restored, records);
         assert!(!raw.contains("\"password\":"));
+        assert!(raw.contains("/opt/bin/iperf3"));
         let _ = fs::remove_dir_all(directory);
     }
 
