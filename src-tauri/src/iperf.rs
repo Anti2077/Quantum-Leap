@@ -195,13 +195,13 @@ fn client_args(
     protocol: TransportProtocol,
     parallel_streams: u8,
     duration_seconds: u16,
+    json_stream: bool,
 ) -> Vec<String> {
     let mut args = vec![
         "-c".into(),
         target_host.trim().into(),
         "-p".into(),
         iperf_port.to_string(),
-        "--json-stream".into(),
         "-i".into(),
         REPORT_INTERVAL_SECONDS.into(),
         "-t".into(),
@@ -209,6 +209,10 @@ fn client_args(
         "-P".into(),
         parallel_streams.to_string(),
     ];
+    if json_stream {
+        let insert_at = 4;
+        args.insert(insert_at, "--json-stream".into());
+    }
     if protocol == TransportProtocol::Udp {
         args.extend(["-u".into(), "-b".into(), "0".into()]);
     }
@@ -216,6 +220,19 @@ fn client_args(
         args.push("-R".into());
     }
     args
+}
+
+async fn supports_json_stream(binary: &PathBuf) -> bool {
+    Command::new(binary)
+        .arg("--help")
+        .output()
+        .await
+        .map(|output| {
+            let mut help = String::from_utf8_lossy(&output.stdout).into_owned();
+            help.push_str(&String::from_utf8_lossy(&output.stderr));
+            help.contains("--json-stream")
+        })
+        .unwrap_or(false)
 }
 
 pub async fn run_local_client(
@@ -228,6 +245,7 @@ pub async fn run_local_client(
     cancel: &mut watch::Receiver<bool>,
 ) -> Result<(), RunError> {
     let binary = resolve_iperf3_binary().map_err(RunError::Message)?;
+    let json_stream = supports_json_stream(&binary).await;
     let mut command = Command::new(binary);
     command
         .args(client_args(
@@ -237,6 +255,7 @@ pub async fn run_local_client(
             protocol,
             parallel_streams,
             duration_seconds,
+            json_stream,
         ))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -263,7 +282,9 @@ pub async fn run_local_client(
         let mut output = ClientOutput::default();
         let mut previous_latency_ms = None;
         while let Ok(Some(line)) = lines.next_line().await {
-            if let Some(mut sample) = parse_sample(&line, direction) {
+            if let Some(mut sample) = parse_sample(&line, direction)
+                .or_else(|| parse_text_sample(&line, direction, parallel_streams))
+            {
                 if let Some((latency_ms, jitter_ms)) = ping_metrics.lock().await.fresh_values() {
                     sample.latency_ms = Some(latency_ms);
                     if protocol == TransportProtocol::Tcp {
@@ -302,11 +323,7 @@ pub async fn run_local_client(
                 } else {
                     stderr.trim()
                 };
-                let error = if detail.contains("unrecognized option") && detail.contains("json-stream") {
-                    RunError::Message(
-                        "本机 iperf3 版本过旧，不支持实时 JSON；请升级到 iperf3 3.17 或更高版本".into()
-                    )
-                } else if should_report_server_unavailable(request, detail) {
+                let error = if should_report_server_unavailable(request, detail) {
                     RunError::ServerUnavailable
                 } else if detail.is_empty() {
                     RunError::Message(format!("iperf3 异常退出：{status}"))
@@ -371,6 +388,7 @@ fn run_remote_client_blocking(
         protocol,
         parallel_streams,
         duration_seconds,
+        true,
     );
     let command = remote_client_command(client, &args);
     let session = connect(client).map_err(RunError::Remote)?;
@@ -420,7 +438,9 @@ fn run_remote_client_blocking(
                 }
                 continue;
             }
-            if let Some(mut sample) = parse_sample(line, direction) {
+            if let Some(mut sample) = parse_sample(line, direction)
+                .or_else(|| parse_text_sample(line, direction, parallel_streams))
+            {
                 add_tcp_latency_jitter(&mut sample, &mut previous_latency_ms);
                 output.sample_count += 1;
                 let _ = app.emit("speed://sample", sample);
@@ -623,6 +643,93 @@ pub fn parse_sample(line: &str, direction: TransferDirection) -> Option<SpeedSam
     })
 }
 
+fn parse_text_number(value: &str, unit: &str) -> Option<f64> {
+    let value = value.parse::<f64>().ok()?;
+    let multiplier = match unit.to_ascii_lowercase().as_str() {
+        "bytes" => 1.0,
+        "kbytes" => 1_000.0,
+        "mbytes" => 1_000_000.0,
+        "gbytes" => 1_000_000_000.0,
+        "tbytes" => 1_000_000_000_000.0,
+        "bits/sec" => 1.0,
+        "kbits/sec" => 1_000.0,
+        "mbits/sec" => 1_000_000.0,
+        "gbits/sec" => 1_000_000_000.0,
+        "tbits/sec" => 1_000_000_000_000.0,
+        _ => return None,
+    };
+    Some(value * multiplier)
+}
+
+fn parse_text_sample(
+    line: &str,
+    direction: TransferDirection,
+    parallel_streams: u8,
+) -> Option<SpeedSampleEvent> {
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    if tokens.len() < 6 || !tokens.first()?.starts_with('[') {
+        return None;
+    }
+    if parallel_streams > 1 && !tokens.first()?.contains("SUM") {
+        return None;
+    }
+
+    let interval_index = tokens.iter().position(|token| {
+        let Some((start, end)) = token.split_once('-') else {
+            return false;
+        };
+        start.parse::<f64>().is_ok() && end.parse::<f64>().is_ok()
+    })?;
+    let (_, end) = tokens[interval_index].split_once('-')?;
+    let elapsed = end.parse::<f64>().ok()?;
+
+    let bandwidth_index = tokens
+        .iter()
+        .position(|token| token.to_ascii_lowercase().ends_with("bits/sec"))?;
+    let bandwidth = parse_text_number(
+        tokens.get(bandwidth_index.checked_sub(1)?)?,
+        tokens[bandwidth_index],
+    )?;
+
+    let bytes = (interval_index + 2..bandwidth_index)
+        .find_map(|index| {
+            let unit = tokens.get(index)?;
+            if !unit.to_ascii_lowercase().ends_with("bytes") {
+                return None;
+            }
+            parse_text_number(tokens.get(index.checked_sub(1)?)?, unit)
+        })
+        .map(|value| value as u64)
+        .unwrap_or_default();
+
+    let jitter_ms = (bandwidth_index + 1..tokens.len()).find_map(|index| {
+        let token = tokens.get(index)?;
+        token
+            .eq_ignore_ascii_case("ms")
+            .then(|| {
+                tokens
+                    .get(index.checked_sub(1)?)
+                    .and_then(|value| value.parse().ok())
+            })
+            .flatten()
+    });
+    let retransmits = tokens
+        .iter()
+        .position(|token| *token == "sender" || *token == "receiver")
+        .and_then(|index| index.checked_sub(1))
+        .and_then(|index| tokens.get(index)?.parse::<u64>().ok());
+
+    Some(SpeedSampleEvent {
+        elapsed,
+        bandwidth_bps: bandwidth,
+        bytes,
+        latency_ms: None,
+        jitter_ms,
+        retransmits,
+        direction,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -663,6 +770,40 @@ mod tests {
         assert_eq!(sample.retransmits, Some(2));
         assert_eq!(sample.latency_ms, Some(13.0));
         assert_eq!(sample.jitter_ms, Some(7.0));
+    }
+
+    #[test]
+    fn parses_legacy_tcp_interval_output() {
+        let line = "[  5]   0.00-1.00   sec  112 MBytes  939 Mbits/sec  3             sender";
+        let sample =
+            parse_text_sample(line, TransferDirection::Upload, 1).expect("legacy TCP interval");
+
+        assert_eq!(sample.elapsed, 1.0);
+        assert_eq!(sample.bytes, 112_000_000);
+        assert_eq!(sample.bandwidth_bps, 939_000_000.0);
+        assert_eq!(sample.retransmits, Some(3));
+    }
+
+    #[test]
+    fn parses_legacy_udp_interval_output() {
+        let line = "[SUM]   0.00-1.00   sec  119 MBytes  998 Mbits/sec  0.021 ms  0/0 (0%)";
+        let sample =
+            parse_text_sample(line, TransferDirection::Download, 8).expect("legacy UDP interval");
+
+        assert_eq!(sample.elapsed, 1.0);
+        assert_eq!(sample.bytes, 119_000_000);
+        assert_eq!(sample.bandwidth_bps, 998_000_000.0);
+        assert_eq!(sample.jitter_ms, Some(0.021));
+        assert_eq!(sample.retransmits, None);
+    }
+
+    #[test]
+    fn skips_non_summary_lines_for_parallel_legacy_output() {
+        let stream = "[  5]   0.00-1.00   sec  112 MBytes  939 Mbits/sec  0             sender";
+        let summary = "[SUM]   0.00-1.00   sec  896 MBytes  7.51 Gbits/sec  0             sender";
+
+        assert!(parse_text_sample(stream, TransferDirection::Upload, 8).is_none());
+        assert!(parse_text_sample(summary, TransferDirection::Upload, 8).is_some());
     }
 
     #[test]
@@ -783,6 +924,7 @@ mod tests {
             TransportProtocol::Udp,
             8,
             30,
+            true,
         );
 
         assert!(args.windows(2).any(|pair| pair == ["-P", "8"]));
@@ -804,6 +946,7 @@ mod tests {
             TransportProtocol::Tcp,
             4,
             0,
+            true,
         );
 
         assert!(args.windows(2).any(|pair| pair == ["-t", "0"]));

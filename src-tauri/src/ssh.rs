@@ -344,15 +344,25 @@ fn server_start_command(remote: &RemoteTarget, one_off: bool) -> String {
 
 pub(crate) fn remote_client_command(remote: &RemoteTarget, args: &[String]) -> String {
     let prelude = remote_iperf_prelude(remote);
-    let arguments = args
+    let json_arguments = args
         .iter()
+        .map(|argument| shell_quote(argument))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let text_arguments = args
+        .iter()
+        .filter(|argument| argument.as_str() != "--json-stream")
         .map(|argument| shell_quote(argument))
         .collect::<Vec<_>>()
         .join(" ");
     let script = format!(
         "{prelude}; \
          printf '{CLIENT_PID_MARKER}%s\\n' \"$$\"; \
-         exec \"$IPERF3_BIN\" {arguments}"
+         if \"$IPERF3_BIN\" --help 2>&1 | grep -q -- '--json-stream'; then \
+           exec \"$IPERF3_BIN\" {json_arguments}; \
+         else \
+           exec \"$IPERF3_BIN\" {text_arguments}; \
+         fi"
     );
     format!("sh -lc {}", shell_quote(&script))
 }
