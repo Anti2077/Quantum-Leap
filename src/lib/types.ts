@@ -3,6 +3,19 @@ export type TestMode = "standard" | "advanced";
 export type TransportProtocol = "tcp" | "udp";
 export type SshAuthMethod = "password" | "privateKey";
 export type ServerMode = "sshManaged" | "existing";
+export type TestTopology = "localToRemote" | "remoteToRemote";
+
+export interface RemoteClientRequest {
+  host: string;
+  sshPort: number;
+  remoteIperfPath: string;
+  username: string;
+  password: string;
+  authMethod: SshAuthMethod;
+  privateKeyPath: string;
+  passphrase: string;
+  allowHostKeyMismatch: boolean;
+}
 
 export interface SpeedTestRequest {
   host: string;
@@ -22,6 +35,8 @@ export interface SpeedTestRequest {
   durationSeconds: number;
   reuseExistingServer: boolean;
   allowHostKeyMismatch: boolean;
+  testTopology: TestTopology;
+  remoteClient?: RemoteClientRequest | null;
 }
 
 export interface SpeedSample {
@@ -40,7 +55,13 @@ export interface SpeedStateEvent {
 }
 
 export interface SpeedPromptEvent {
-  kind: "hostKeyMismatch" | "existingServer" | "iperf3Missing" | "serverUnavailable";
+  kind:
+    | "hostKeyMismatch"
+    | "clientHostKeyMismatch"
+    | "existingServer"
+    | "iperf3Missing"
+    | "clientIperf3Missing"
+    | "serverUnavailable";
   title: string;
   message: string;
   detail?: string | null;

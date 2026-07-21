@@ -4,12 +4,14 @@ mod saved_server;
 mod ssh;
 
 use crate::{
-    iperf::{run_local_client, RunError},
+    iperf::{run_local_client, run_remote_client, RunError},
     model::{
         RemoteTarget, ServerMode, SpeedPromptEvent, SpeedStateEvent, SpeedTestRequest, TestMode,
-        TransferDirection, TransportProtocol,
+        TestTopology, TransferDirection, TransportProtocol,
     },
-    ssh::{cleanup_remote_server, start_remote_server, RemoteServer, SshError},
+    ssh::{
+        cleanup_remote_client, cleanup_remote_server, start_remote_server, RemoteServer, SshError,
+    },
 };
 use std::{
     sync::{
@@ -24,10 +26,15 @@ use tokio::sync::watch;
 
 #[derive(Clone)]
 struct ActiveSession {
-    remote: Option<RemoteTarget>,
-    remote_pid: Arc<AtomicU32>,
+    server_remote: Option<RemoteTarget>,
+    server_pid: Arc<AtomicU32>,
+    client_remote: Option<RemoteTarget>,
+    client_pid: Arc<AtomicU32>,
+    target_host: String,
+    iperf_port: u16,
     startup_finished: Arc<AtomicBool>,
     cancel: watch::Sender<bool>,
+    cancel_remote: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -89,10 +96,65 @@ fn clear_active(active: &Arc<Mutex<Option<ActiveSession>>>, pid: &Arc<AtomicU32>
     if let Ok(mut guard) = active.lock() {
         if guard
             .as_ref()
-            .is_some_and(|session| Arc::ptr_eq(&session.remote_pid, pid))
+            .is_some_and(|session| Arc::ptr_eq(&session.server_pid, pid))
         {
             *guard = None;
         }
+    }
+}
+
+async fn cleanup_endpoints(
+    server_remote: Option<RemoteTarget>,
+    server_pid: u32,
+    client_remote: Option<RemoteTarget>,
+    client_pid: u32,
+    target_host: String,
+    iperf_port: u16,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut errors = Vec::new();
+        if let Some(client) = client_remote {
+            if let Err(error) = cleanup_remote_client(&client, client_pid, &target_host, iperf_port)
+            {
+                errors.push(error);
+            }
+        }
+        if let Some(server) = server_remote {
+            if let Err(error) = cleanup_remote_server(&server, server_pid) {
+                errors.push(error);
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("；"))
+        }
+    })
+    .await
+    .map_err(|error| format!("清理任务异常结束：{error}"))?
+}
+
+fn emit_client_ssh_error(app: &AppHandle, error: SshError) {
+    match error {
+        SshError::HostKeyMismatch(fingerprint) => emit_prompt(
+            app,
+            "clientHostKeyMismatch",
+            "测速发起端身份已变化",
+            "测速发起端的 SSH 主机密钥与 known_hosts 不一致。确认指纹可信后才能继续。",
+            Some(fingerprint),
+        ),
+        SshError::Iperf3Missing(package_manager) => emit_prompt(
+            app,
+            "clientIperf3Missing",
+            "测速发起端未安装 iperf3",
+            package_manager.label().map_or_else(
+                || "请登录测速发起端手动安装 iperf3 3.17 或更高版本。".to_string(),
+                |label| format!("测速发起端检测到 {label}。请执行下面的命令，安装完成后重新检测。"),
+            ),
+            package_manager.install_command().map(str::to_string),
+        ),
+        SshError::ExistingServer => emit_state(app, "failed", "测速发起端状态异常"),
+        SshError::Message(message) => emit_state(app, "failed", format!("测速发起端：{message}")),
     }
 }
 
@@ -104,15 +166,24 @@ async fn start_speed_test(
 ) -> Result<(), String> {
     payload.validate()?;
     let manages_remote = payload.server_mode == ServerMode::SshManaged;
+    let remote_to_remote = payload.test_topology == TestTopology::RemoteToRemote;
     let remote = payload.remote_target();
+    let remote_client = payload.remote_client_target();
     let (cancel_tx, mut cancel_rx) = watch::channel(false);
     let remote_pid = Arc::new(AtomicU32::new(0));
+    let client_pid = Arc::new(AtomicU32::new(0));
+    let cancel_remote = Arc::new(AtomicBool::new(false));
     let startup_finished = Arc::new(AtomicBool::new(false));
     let session = ActiveSession {
-        remote: manages_remote.then(|| remote.clone()),
-        remote_pid: remote_pid.clone(),
+        server_remote: manages_remote.then(|| remote.clone()),
+        server_pid: remote_pid.clone(),
+        client_remote: remote_client.clone(),
+        client_pid: client_pid.clone(),
+        target_host: remote.host.clone(),
+        iperf_port: remote.iperf_port,
         startup_finished: startup_finished.clone(),
         cancel: cancel_tx,
+        cancel_remote: cancel_remote.clone(),
     };
 
     {
@@ -129,7 +200,9 @@ async fn start_speed_test(
     emit_state(
         &app,
         "starting",
-        if manages_remote {
+        if remote_to_remote {
+            "正在建立双端 SSH 安全通道"
+        } else if manages_remote {
             "正在建立 SSH 安全通道"
         } else {
             "正在连接已有测速服务"
@@ -203,17 +276,16 @@ async fn start_speed_test(
         let managed = server.is_managed();
 
         if *cancel_rx.borrow() {
-            let cleanup_result = if managed {
-                let remote_for_cleanup = remote.clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    cleanup_remote_server(&remote_for_cleanup, pid)
-                })
-                .await
-                .map_err(|error| format!("清理任务异常结束：{error}"))
-                .and_then(|result| result)
-            } else {
-                Ok(())
-            };
+            cancel_remote.store(true, Ordering::Release);
+            let cleanup_result = cleanup_endpoints(
+                managed.then(|| remote.clone()),
+                pid,
+                remote_client.clone(),
+                client_pid.load(Ordering::Acquire),
+                remote.host.clone(),
+                remote.iperf_port,
+            )
+            .await;
             match cleanup_result {
                 Ok(()) => emit_state(
                     &app,
@@ -245,6 +317,10 @@ async fn start_speed_test(
         let mut run_result = Ok(());
 
         for (index, direction) in directions.iter().copied().enumerate() {
+            if *cancel_rx.borrow() || cancel_remote.load(Ordering::Acquire) {
+                run_result = Err(RunError::Cancelled);
+                break;
+            }
             let direction_name = if direction == TransferDirection::Upload {
                 "上传"
             } else {
@@ -268,17 +344,33 @@ async fn start_speed_test(
                 ),
             );
 
-            if let Err(error) = run_local_client(
-                &app,
-                &payload,
-                direction,
-                protocol,
-                streams,
-                duration,
-                &mut cancel_rx,
-            )
-            .await
-            {
+            let result = if let Some(client) = remote_client.as_ref() {
+                run_remote_client(
+                    &app,
+                    client,
+                    &remote.host,
+                    remote.iperf_port,
+                    direction,
+                    protocol,
+                    streams,
+                    duration,
+                    cancel_remote.clone(),
+                    client_pid.clone(),
+                )
+                .await
+            } else {
+                run_local_client(
+                    &app,
+                    &payload,
+                    direction,
+                    protocol,
+                    streams,
+                    duration,
+                    &mut cancel_rx,
+                )
+                .await
+            };
+            if let Err(error) = result {
                 run_result = Err(error);
                 break;
             }
@@ -297,17 +389,15 @@ async fn start_speed_test(
             },
         );
 
-        let cleanup_result = if managed {
-            let remote_for_cleanup = remote.clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                cleanup_remote_server(&remote_for_cleanup, pid)
-            })
-            .await
-            .map_err(|err| format!("清理任务异常结束：{err}"))
-            .and_then(|result| result)
-        } else {
-            Ok(())
-        };
+        let cleanup_result = cleanup_endpoints(
+            managed.then(|| remote.clone()),
+            pid,
+            remote_client.clone(),
+            client_pid.load(Ordering::Acquire),
+            remote.host.clone(),
+            remote.iperf_port,
+        )
+        .await;
 
         match (run_result, cleanup_result) {
             (Ok(()), Ok(())) => emit_state(
@@ -332,6 +422,7 @@ async fn start_speed_test(
                 emit_server_unavailable_prompt(&app, manages_remote, &remote)
             }
             (Err(RunError::Message(error)), Ok(())) => emit_state(&app, "failed", error),
+            (Err(RunError::Remote(error)), Ok(())) => emit_client_ssh_error(&app, error),
             (Ok(()), Err(error)) => emit_state(&app, "failed", error),
             (Err(RunError::Cancelled), Err(error)) => emit_state(
                 &app,
@@ -343,6 +434,10 @@ async fn start_speed_test(
                 "failed",
                 format!("{run_error}；同时远端清理失败：{cleanup_error}"),
             ),
+            (Err(RunError::Remote(error)), Err(cleanup_error)) => {
+                emit_client_ssh_error(&app, error);
+                emit_state(&app, "failed", format!("同时远端清理失败：{cleanup_error}"));
+            }
             (Err(RunError::ServerUnavailable), Err(cleanup_error)) => {
                 emit_server_unavailable_prompt(&app, manages_remote, &remote);
                 emit_state(&app, "failed", format!("同时远端清理失败：{cleanup_error}"));
@@ -365,7 +460,27 @@ async fn stop_speed_test(app: AppHandle, state: State<'_, AppState>) -> Result<(
 
     if let Some(session) = session {
         let _ = session.cancel.send(true);
+        session.cancel_remote.store(true, Ordering::Release);
         emit_state(&app, "stopping", "正在停止测速");
+
+        // The remote client is read through a blocking SSH channel. Proactively terminate
+        // managed endpoint processes so the channel reaches EOF instead of waiting for the
+        // next iperf3 sample before observing the cancellation flag.
+        let server_pid = session.server_pid.load(Ordering::Acquire);
+        let client_pid = session.client_pid.load(Ordering::Acquire);
+        if server_pid != 0 || client_pid != 0 {
+            tauri::async_runtime::spawn(async move {
+                let _ = cleanup_endpoints(
+                    session.server_remote,
+                    server_pid,
+                    session.client_remote,
+                    client_pid,
+                    session.target_host,
+                    session.iperf_port,
+                )
+                .await;
+            });
+        }
     }
     Ok(())
 }
@@ -379,15 +494,25 @@ fn cleanup_before_exit(app: &tauri::AppHandle) {
         .and_then(|guard| guard.clone());
     if let Some(session) = session {
         let _ = session.cancel.send(true);
+        session.cancel_remote.store(true, Ordering::Release);
         let wait_started = Instant::now();
         while !session.startup_finished.load(Ordering::Acquire)
             && wait_started.elapsed() < Duration::from_secs(13)
         {
             thread::sleep(Duration::from_millis(25));
         }
-        let pid = session.remote_pid.load(Ordering::Acquire);
-        if let Some(remote) = session.remote {
-            let _ = cleanup_remote_server(&remote, pid);
+        let server_pid = session.server_pid.load(Ordering::Acquire);
+        let client_pid = session.client_pid.load(Ordering::Acquire);
+        if let Some(client) = session.client_remote {
+            let _ = cleanup_remote_client(
+                &client,
+                client_pid,
+                &session.target_host,
+                session.iperf_port,
+            );
+        }
+        if let Some(server) = session.server_remote {
+            let _ = cleanup_remote_server(&server, server_pid);
         }
     }
 }

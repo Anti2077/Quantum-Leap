@@ -1,8 +1,22 @@
 use crate::model::{
-    ServerMode, SpeedSampleEvent, SpeedTestRequest, TransferDirection, TransportProtocol,
+    RemoteTarget, ServerMode, SpeedSampleEvent, SpeedTestRequest, TransferDirection,
+    TransportProtocol,
+};
+use crate::ssh::{
+    connect, parse_remote_iperf_error, remote_client_command, SshError, CLIENT_PID_MARKER,
 };
 use serde_json::Value;
-use std::{env, path::PathBuf, process::Stdio, sync::Arc, time::Instant};
+use std::{
+    env,
+    io::{BufRead as _, BufReader as StdBufReader, Read as _},
+    path::PathBuf,
+    process::Stdio,
+    sync::{
+        atomic::{AtomicBool, AtomicU32, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 use tauri::{async_runtime::JoinHandle, AppHandle, Emitter};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
@@ -38,6 +52,7 @@ impl PingMetrics {
 pub enum RunError {
     Cancelled,
     ServerUnavailable,
+    Remote(SshError),
     Message(String),
 }
 
@@ -174,7 +189,8 @@ async fn stop_ping(process: &mut Option<(Child, JoinHandle<()>)>) {
 }
 
 fn client_args(
-    request: &SpeedTestRequest,
+    target_host: &str,
+    iperf_port: u16,
     direction: TransferDirection,
     protocol: TransportProtocol,
     parallel_streams: u8,
@@ -182,9 +198,9 @@ fn client_args(
 ) -> Vec<String> {
     let mut args = vec![
         "-c".into(),
-        request.host.trim().into(),
+        target_host.trim().into(),
         "-p".into(),
-        request.iperf_port.to_string(),
+        iperf_port.to_string(),
         "--json-stream".into(),
         "-i".into(),
         REPORT_INTERVAL_SECONDS.into(),
@@ -215,7 +231,8 @@ pub async fn run_local_client(
     let mut command = Command::new(binary);
     command
         .args(client_args(
-            request,
+            request.host.trim(),
+            request.iperf_port,
             direction,
             protocol,
             parallel_streams,
@@ -330,6 +347,177 @@ pub async fn run_local_client(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_remote_client_blocking(
+    app: &AppHandle,
+    client: &RemoteTarget,
+    target_host: &str,
+    iperf_port: u16,
+    direction: TransferDirection,
+    protocol: TransportProtocol,
+    parallel_streams: u8,
+    duration_seconds: u16,
+    cancel: &AtomicBool,
+    remote_pid: &AtomicU32,
+) -> Result<(), RunError> {
+    remote_pid.store(0, Ordering::Release);
+    if cancel.load(Ordering::Acquire) {
+        return Err(RunError::Cancelled);
+    }
+    let args = client_args(
+        target_host,
+        iperf_port,
+        direction,
+        protocol,
+        parallel_streams,
+        duration_seconds,
+    );
+    let command = remote_client_command(client, &args);
+    let session = connect(client).map_err(RunError::Remote)?;
+    if cancel.load(Ordering::Acquire) {
+        return Err(RunError::Cancelled);
+    }
+    let mut channel = session.channel_session().map_err(|error| {
+        RunError::Remote(SshError::Message(format!(
+            "打开测速发起端 SSH 通道失败：{error}"
+        )))
+    })?;
+    channel.exec(&command).map_err(|error| {
+        RunError::Remote(SshError::Message(format!(
+            "执行远端 iperf3 client 失败：{error}"
+        )))
+    })?;
+
+    let mut output = ClientOutput::default();
+    let mut previous_latency_ms = None;
+    let mut received_pid_marker = false;
+    {
+        let mut reader = StdBufReader::new(&mut channel);
+        loop {
+            if received_pid_marker && cancel.load(Ordering::Acquire) {
+                break;
+            }
+            let mut line = String::new();
+            let bytes = reader.read_line(&mut line).map_err(|error| {
+                if cancel.load(Ordering::Acquire) {
+                    RunError::Cancelled
+                } else {
+                    RunError::Message(format!("读取远端 iperf3 输出失败：{error}"))
+                }
+            })?;
+            if bytes == 0 {
+                break;
+            }
+            let line = line.trim_end_matches(['\r', '\n']);
+            if let Some(pid) = line
+                .strip_prefix(CLIENT_PID_MARKER)
+                .and_then(|value| value.trim().parse::<u32>().ok())
+            {
+                remote_pid.store(pid, Ordering::Release);
+                received_pid_marker = true;
+                if cancel.load(Ordering::Acquire) {
+                    break;
+                }
+                continue;
+            }
+            if let Some(mut sample) = parse_sample(line, direction) {
+                add_tcp_latency_jitter(&mut sample, &mut previous_latency_ms);
+                output.sample_count += 1;
+                let _ = app.emit("speed://sample", sample);
+            } else if let Some(error) = parse_error_line(line) {
+                output.error = Some(error);
+            }
+        }
+    }
+
+    if cancel.load(Ordering::Acquire) {
+        let _ = channel.close();
+        let _ = channel.wait_close();
+        return Err(RunError::Cancelled);
+    }
+
+    let mut stderr = String::new();
+    channel
+        .stderr()
+        .read_to_string(&mut stderr)
+        .map_err(|error| RunError::Message(format!("读取远端 iperf3 错误输出失败：{error}")))?;
+    channel
+        .wait_close()
+        .map_err(|error| RunError::Message(format!("关闭测速发起端 SSH 通道失败：{error}")))?;
+    let status = channel
+        .exit_status()
+        .map_err(|error| RunError::Message(format!("读取远端 iperf3 退出状态失败：{error}")))?;
+    let detail = if stderr.trim().is_empty() {
+        output.error.as_deref().unwrap_or_default()
+    } else {
+        stderr.trim()
+    };
+
+    if status != 0 {
+        if stderr.contains("IPERF3_PATH_INVALID:") || stderr.contains("IPERF3_NOT_FOUND:") {
+            return Err(RunError::Remote(parse_remote_iperf_error(
+                &stderr,
+                status,
+                "测速发起端 iperf3 启动",
+            )));
+        }
+        if is_server_unavailable(detail) {
+            return Err(RunError::ServerUnavailable);
+        }
+        return Err(RunError::Message(if detail.is_empty() {
+            format!("远端 iperf3 client 异常退出（退出码 {status}）")
+        } else {
+            format!("远端 iperf3 测速失败：{detail}")
+        }));
+    }
+
+    if output.sample_count == 0 {
+        if is_server_unavailable(detail) {
+            return Err(RunError::ServerUnavailable);
+        }
+        return Err(RunError::Message(if detail.is_empty() {
+            "远端 iperf3 已结束，但没有产生实时采样".into()
+        } else {
+            format!("远端 iperf3 没有产生采样：{detail}")
+        }));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_remote_client(
+    app: &AppHandle,
+    client: &RemoteTarget,
+    target_host: &str,
+    iperf_port: u16,
+    direction: TransferDirection,
+    protocol: TransportProtocol,
+    parallel_streams: u8,
+    duration_seconds: u16,
+    cancel: Arc<AtomicBool>,
+    remote_pid: Arc<AtomicU32>,
+) -> Result<(), RunError> {
+    let app = app.clone();
+    let client = client.clone();
+    let target_host = target_host.to_owned();
+    tauri::async_runtime::spawn_blocking(move || {
+        run_remote_client_blocking(
+            &app,
+            &client,
+            &target_host,
+            iperf_port,
+            direction,
+            protocol,
+            parallel_streams,
+            duration_seconds,
+            &cancel,
+            &remote_pid,
+        )
+    })
+    .await
+    .map_err(|error| RunError::Message(format!("远端测速任务异常结束：{error}")))?
+}
+
 fn add_tcp_latency_jitter(sample: &mut SpeedSampleEvent, previous_latency_ms: &mut Option<f64>) {
     let Some(latency_ms) = sample.latency_ms else {
         return;
@@ -438,7 +626,7 @@ pub fn parse_sample(line: &str, direction: TransferDirection) -> Option<SpeedSam
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ServerMode, SshAuthMethod, TestMode};
+    use crate::model::{ServerMode, SshAuthMethod, TestMode, TestTopology};
 
     fn request() -> SpeedTestRequest {
         SpeedTestRequest {
@@ -459,6 +647,8 @@ mod tests {
             duration_seconds: 10,
             reuse_existing_server: false,
             allow_host_key_mismatch: false,
+            test_topology: TestTopology::LocalToRemote,
+            remote_client: None,
         }
     }
 
@@ -587,7 +777,8 @@ mod tests {
     #[test]
     fn builds_advanced_udp_download_arguments() {
         let args = client_args(
-            &request(),
+            "10.0.0.8",
+            5201,
             TransferDirection::Download,
             TransportProtocol::Udp,
             8,
@@ -607,7 +798,8 @@ mod tests {
     #[test]
     fn builds_continuous_duration_arguments() {
         let args = client_args(
-            &request(),
+            "10.0.0.8",
+            5201,
             TransferDirection::Upload,
             TransportProtocol::Tcp,
             4,

@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AnimatePresence, motion } from "framer-motion";
 import Activity from "lucide-react/dist/esm/icons/activity.js";
 import ArrowDownToLine from "lucide-react/dist/esm/icons/arrow-down-to-line.js";
+import ArrowRightLeft from "lucide-react/dist/esm/icons/arrow-right-left.js";
 import ArrowUpFromLine from "lucide-react/dist/esm/icons/arrow-up-from-line.js";
 import CircleAlert from "lucide-react/dist/esm/icons/circle-alert.js";
 import BookMarked from "lucide-react/dist/esm/icons/book-marked.js";
@@ -60,6 +61,7 @@ import type {
   ServerMode,
   SshAuthMethod,
   TestMode,
+  TestTopology,
   TransferDirection,
   TransportProtocol
 } from "../lib/types";
@@ -72,6 +74,7 @@ import { MacGlyph } from "./MacGlyph";
 import { NumberTicker } from "./NumberTicker";
 
 interface ConnectionForm {
+  testTopology: TestTopology;
   host: string;
   sshPort: string;
   iperfPort: string;
@@ -89,6 +92,17 @@ interface ConnectionForm {
   durationSeconds: string;
 }
 
+interface RemoteClientForm {
+  host: string;
+  sshPort: string;
+  remoteIperfPath: string;
+  username: string;
+  password: string;
+  authMethod: SshAuthMethod;
+  privateKeyPath: string;
+  passphrase: string;
+}
+
 interface SamplePoint {
   t: number;
   bps: number;
@@ -100,6 +114,7 @@ interface SamplePoint {
 }
 
 const initialForm: ConnectionForm = {
+  testTopology: "localToRemote",
   host: "",
   sshPort: "22",
   iperfPort: "5201",
@@ -115,6 +130,17 @@ const initialForm: ConnectionForm = {
   protocol: "tcp",
   parallelStreams: "8",
   durationSeconds: "10"
+};
+
+const initialRemoteClientForm: RemoteClientForm = {
+  host: "",
+  sshPort: "22",
+  remoteIperfPath: "",
+  username: "",
+  password: "",
+  authMethod: "password",
+  privateKeyPath: "~/.ssh/id_ed25519",
+  passphrase: ""
 };
 
 const terminalPhases: SpeedStateEvent["phase"][] = ["completed", "cancelled", "failed"];
@@ -166,6 +192,37 @@ function FieldLabel({ icon, children }: { icon: ReactNode; children: ReactNode }
       {icon}
       {children}
     </span>
+  );
+}
+
+function SavedEndpointSelect({
+  value,
+  servers,
+  disabled,
+  onChange
+}: {
+  value: string;
+  servers: SavedServer[];
+  disabled: boolean;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <label>
+      <FieldLabel icon={<BookMarked size={13} />}>从常用设备载入</FieldLabel>
+      <select
+        className="glass-input"
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">手动填写</option>
+        {servers.map((server) => (
+          <option value={server.id} key={server.id}>
+            {server.note ? `${server.note} · ${server.host}` : server.host}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -226,6 +283,19 @@ export function SpeedWorkbench() {
         }
       : initialForm
   );
+  const [clientForm, setClientForm] = useState<RemoteClientForm>(() =>
+    designPreviewTheme
+      ? {
+          ...initialRemoteClientForm,
+          host: "192.168.10.4",
+          username: "anti",
+          password: "preview-password",
+          remoteIperfPath: "/opt/bin/iperf3"
+        }
+      : initialRemoteClientForm
+  );
+  const [clientSavedId, setClientSavedId] = useState("");
+  const [serverSavedId, setServerSavedId] = useState("");
   const [samples, setSamples] = useState<SamplePoint[]>(() =>
     designPreviewTheme ? designPreviewSamples() : []
   );
@@ -394,8 +464,8 @@ export function SpeedWorkbench() {
           message:
             prompt.kind === "serverUnavailable"
               ? prompt.message
-              : prompt.kind === "iperf3Missing"
-                ? "测速未开始：远端缺少 iperf3"
+              : prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing"
+                ? "测速未开始：设备缺少 iperf3"
                 : "已取消本次连接"
         });
       } else {
@@ -413,6 +483,7 @@ export function SpeedWorkbench() {
   const busy = previewDirection != null || ["starting", "running", "stopping"].includes(status.phase);
   const running = previewDirection != null || status.phase === "running";
   const standard = form.testMode === "standard";
+  const remoteToRemote = form.testTopology === "remoteToRemote";
   const sshManaged = form.serverMode === "sshManaged";
   const completedStandard = standard && status.phase === "completed";
   const requestedDuration = form.durationSeconds.trim() === "" ? Number.NaN : Number(form.durationSeconds);
@@ -426,6 +497,18 @@ export function SpeedWorkbench() {
   const protocol: TransportProtocol = standard ? "tcp" : form.protocol;
   const remoteIperfPath = form.remoteIperfPath.trim();
   const remoteIperfPathInvalid = sshManaged && remoteIperfPath.length > 0 && !remoteIperfPath.startsWith("/");
+  const clientRemoteIperfPath = clientForm.remoteIperfPath.trim();
+  const clientRemoteIperfPathInvalid =
+    remoteToRemote && clientRemoteIperfPath.length > 0 && !clientRemoteIperfPath.startsWith("/");
+  const clientValid =
+    !remoteToRemote ||
+    (clientForm.host.trim().length > 0 &&
+      Number(clientForm.sshPort) > 0 &&
+      clientForm.username.trim().length > 0 &&
+      !clientRemoteIperfPathInvalid &&
+      (clientForm.authMethod === "privateKey"
+        ? clientForm.privateKeyPath.trim().length > 0
+        : clientForm.password.length > 0));
   const activeDirection = previewDirection ?? (standard ? (latest?.direction ?? "upload") : form.direction);
   const activeSamples = useMemo(
     () => samples.filter((sample) => sample.direction === activeDirection),
@@ -472,6 +555,7 @@ export function SpeedWorkbench() {
     form.host.trim().length > 0 &&
     Number(form.iperfPort) > 0 &&
     !remoteIperfPathInvalid &&
+    clientValid &&
     (!sshManaged || (
       form.username.trim().length > 0 &&
       (form.authMethod === "privateKey"
@@ -497,6 +581,75 @@ export function SpeedWorkbench() {
     setForm((current) => ({ ...current, [key]: value }));
   };
 
+  const updateServer = <K extends keyof ConnectionForm>(key: K, value: ConnectionForm[K]) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    setServerSavedId("");
+  };
+
+  const updateClient = <K extends keyof RemoteClientForm>(key: K, value: RemoteClientForm[K]) => {
+    setClientForm((current) => ({ ...current, [key]: value }));
+    setClientSavedId("");
+  };
+
+  const selectSavedClient = async (id: string) => {
+    setClientSavedId(id);
+    if (!id || savedBusy) return;
+    const server = savedServers.find((candidate) => candidate.id === id);
+    if (!server || server.serverMode !== "sshManaged") return;
+    setSavedBusy(true);
+    try {
+      const password = server.password || (await getSavedServerPassword(server.id));
+      setSavedServers((current) =>
+        current.map((saved) => (saved.id === server.id ? { ...saved, password } : saved))
+      );
+      setClientForm({
+        host: server.host,
+        sshPort: server.sshPort.toString(),
+        remoteIperfPath: server.remoteIperfPath || "",
+        username: server.username,
+        password,
+        authMethod: server.authMethod,
+        privateKeyPath: server.privateKeyPath || initialRemoteClientForm.privateKeyPath,
+        passphrase: server.authMethod === "privateKey" ? password : ""
+      });
+      setStatus({ phase: "idle", message: `已将 ${server.note || server.host} 设为测速发起端` });
+    } catch (error) {
+      setStatus({ phase: "failed", message: errorMessage(error) });
+    } finally {
+      setSavedBusy(false);
+    }
+  };
+
+  const swapRemoteEndpoints = () => {
+    if (!remoteToRemote || !sshManaged || busy) return;
+    const previousServer = {
+      host: form.host,
+      sshPort: form.sshPort,
+      remoteIperfPath: form.remoteIperfPath,
+      username: form.username,
+      password: form.password,
+      authMethod: form.authMethod,
+      privateKeyPath: form.privateKeyPath,
+      passphrase: form.passphrase
+    };
+    setForm((current) => ({
+      ...current,
+      host: clientForm.host,
+      sshPort: clientForm.sshPort,
+      remoteIperfPath: clientForm.remoteIperfPath,
+      username: clientForm.username,
+      password: clientForm.password,
+      authMethod: clientForm.authMethod,
+      privateKeyPath: clientForm.privateKeyPath,
+      passphrase: clientForm.passphrase
+    }));
+    setClientForm(previousServer);
+    const previousClientSavedId = clientSavedId;
+    setClientSavedId(serverSavedId);
+    setServerSavedId(previousClientSavedId);
+    setStatus({ phase: "idle", message: "已交换测速发起端与服务端" });
+  };
+
   const selectSavedServer = async (server: SavedServer) => {
     if (savedBusy) return;
     setSavedBusy(true);
@@ -520,6 +673,7 @@ export function SpeedWorkbench() {
         privateKeyPath: server.privateKeyPath || initialForm.privateKeyPath,
         passphrase: server.authMethod === "privateKey" ? password : ""
       }));
+      setServerSavedId(server.id);
       setSavedMenuOpen(false);
       setStatus({ phase: "idle", message: `已载入 ${server.host}` });
     } catch (error) {
@@ -527,6 +681,13 @@ export function SpeedWorkbench() {
     } finally {
       setSavedBusy(false);
     }
+  };
+
+  const selectSavedServerById = async (id: string) => {
+    setServerSavedId(id);
+    if (!id || savedBusy) return;
+    const server = savedServers.find((candidate) => candidate.id === id);
+    if (server) await selectSavedServer(server);
   };
 
   const openSavedNoteEditor = () => {
@@ -595,7 +756,12 @@ export function SpeedWorkbench() {
     requestRef.current = request;
     setStatus({
       phase: "starting",
-      message: request.serverMode === "sshManaged" ? "正在建立 SSH 安全通道" : "正在连接已有测速服务"
+      message:
+        request.testTopology === "remoteToRemote"
+          ? "正在建立双端 SSH 安全通道"
+          : request.serverMode === "sshManaged"
+            ? "正在建立 SSH 安全通道"
+            : "正在连接已有测速服务"
     });
     try {
       await startSpeedTest(request);
@@ -625,7 +791,21 @@ export function SpeedWorkbench() {
       parallelStreams,
       durationSeconds: duration,
       reuseExistingServer: false,
-      allowHostKeyMismatch: false
+      allowHostKeyMismatch: false,
+      testTopology: form.testTopology,
+      remoteClient: remoteToRemote
+        ? {
+            host: clientForm.host.trim(),
+            sshPort: Number(clientForm.sshPort),
+            remoteIperfPath: clientRemoteIperfPath,
+            username: clientForm.username.trim(),
+            password: clientForm.password,
+            authMethod: clientForm.authMethod,
+            privateKeyPath: clientForm.privateKeyPath.trim(),
+            passphrase: clientForm.passphrase,
+            allowHostKeyMismatch: false
+          }
+        : null
     };
 
     setSamples([]);
@@ -641,7 +821,11 @@ export function SpeedWorkbench() {
     const nextRequest = {
       ...request,
       reuseExistingServer: request.reuseExistingServer || prompt.kind === "existingServer",
-      allowHostKeyMismatch: request.allowHostKeyMismatch || prompt.kind === "hostKeyMismatch"
+      allowHostKeyMismatch: request.allowHostKeyMismatch || prompt.kind === "hostKeyMismatch",
+      remoteClient:
+        request.remoteClient && prompt.kind === "clientHostKeyMismatch"
+          ? { ...request.remoteClient, allowHostKeyMismatch: true }
+          : request.remoteClient
     };
     setPrompt(null);
     await launch(nextRequest);
@@ -658,7 +842,7 @@ export function SpeedWorkbench() {
   };
 
   const rejectPrompt = () => {
-    const missingIperf3 = prompt?.kind === "iperf3Missing";
+    const missingIperf3 = prompt?.kind === "iperf3Missing" || prompt?.kind === "clientIperf3Missing";
     const serverUnavailable = prompt?.kind === "serverUnavailable";
     setPrompt(null);
     requestRef.current = null;
@@ -703,8 +887,10 @@ export function SpeedWorkbench() {
           <GlassPanel className="connection-panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">{sshManaged ? "SSH endpoint" : "IPERF3 endpoint"}</span>
-                <h1>连接服务器</h1>
+                <span className="eyebrow">
+                  {remoteToRemote ? "Dual SSH" : sshManaged ? "SSH endpoint" : "IPERF3 endpoint"}
+                </span>
+                <h1>{remoteToRemote ? "设备互测" : "连接服务器"}</h1>
               </div>
               <div className="saved-server-control" ref={savedControlRef}>
                 <button
@@ -815,6 +1001,214 @@ export function SpeedWorkbench() {
 
               <form onSubmit={submit} className="connection-form">
                 <div className="connection-scroll-region">
+                <div className="topology-picker">
+                  <div className="server-mode-label">
+                    <FieldLabel icon={<Network size={13} />}>测速拓扑</FieldLabel>
+                    <span className="mode-help" tabIndex={0} aria-label="测速拓扑说明">
+                      <Info size={14} aria-hidden="true" />
+                      <span className="mode-tooltip" role="tooltip">
+                        <strong>Mac ↔ 服务器</strong>
+                        <span>沿用当前模式，Mac 本机运行 iperf3 client。</span>
+                        <strong>设备 A ↔ 设备 B</strong>
+                        <span>Mac 只通过 SSH 控制两端，测速流量不会经过 Mac。</span>
+                      </span>
+                    </span>
+                  </div>
+                  <div className="test-mode-tabs topology-tabs" aria-label="测速拓扑">
+                    <button
+                      type="button"
+                      className={!remoteToRemote ? "selected" : ""}
+                      disabled={busy}
+                      onClick={() => update("testTopology", "localToRemote")}
+                    >
+                      Mac ↔ 服务器
+                    </button>
+                    <button
+                      type="button"
+                      className={remoteToRemote ? "selected" : ""}
+                      disabled={busy}
+                      onClick={() => update("testTopology", "remoteToRemote")}
+                    >
+                      设备 A ↔ 设备 B
+                    </button>
+                  </div>
+                </div>
+
+                <AnimatePresence initial={false}>
+                  {remoteToRemote && (
+                    <motion.section
+                      className="endpoint-card"
+                      initial={{ opacity: 0, height: 0, y: -5 }}
+                      animate={{ opacity: 1, height: "auto", y: 0 }}
+                      exit={{ opacity: 0, height: 0, y: -5 }}
+                    >
+                      <div className="endpoint-heading">
+                        <div>
+                          <span className="eyebrow">IPERF3 CLIENT</span>
+                          <strong>测速发起端 A</strong>
+                        </div>
+                        <button
+                          type="button"
+                          className="swap-endpoints"
+                          onClick={swapRemoteEndpoints}
+                          disabled={!sshManaged || busy}
+                          title={sshManaged ? "交换 A/B 两端" : "服务端使用 SSH 自动管理时才能交换"}
+                        >
+                          <ArrowRightLeft size={14} />
+                          交换
+                        </button>
+                      </div>
+
+                      <SavedEndpointSelect
+                        value={clientSavedId}
+                        servers={savedServers.filter((server) => server.serverMode === "sshManaged")}
+                        disabled={busy || savedBusy}
+                        onChange={(id) => void selectSavedClient(id)}
+                      />
+
+                      <div className="field-grid">
+                        <label>
+                          <FieldLabel icon={<Radio size={13} />}>设备 A 地址</FieldLabel>
+                          <input
+                            className="glass-input"
+                            value={clientForm.host}
+                            disabled={busy}
+                            onChange={(event) => updateClient("host", event.target.value)}
+                            placeholder="192.168.1.10"
+                            spellCheck={false}
+                            autoComplete="off"
+                          />
+                        </label>
+                        <label>
+                          <FieldLabel icon={<Server size={13} />}>SSH 端口</FieldLabel>
+                          <input
+                            className="glass-input"
+                            type="number"
+                            min="1"
+                            max="65535"
+                            value={clientForm.sshPort}
+                            disabled={busy}
+                            onChange={(event) => updateClient("sshPort", event.target.value)}
+                          />
+                        </label>
+                      </div>
+
+                      <label>
+                        <FieldLabel icon={<UserRound size={13} />}>用户名</FieldLabel>
+                        <input
+                          className="glass-input"
+                          value={clientForm.username}
+                          disabled={busy}
+                          onChange={(event) => updateClient("username", event.target.value)}
+                          placeholder="ubuntu"
+                          autoComplete="username"
+                        />
+                      </label>
+
+                      <div className="test-mode-tabs auth-method-tabs" aria-label="测速发起端 SSH 认证方式">
+                        <button
+                          type="button"
+                          className={clientForm.authMethod === "password" ? "selected" : ""}
+                          disabled={busy}
+                          onClick={() => updateClient("authMethod", "password")}
+                        >
+                          <KeyRound size={14} aria-hidden="true" />
+                          密码登录
+                        </button>
+                        <button
+                          type="button"
+                          className={clientForm.authMethod === "privateKey" ? "selected" : ""}
+                          disabled={busy}
+                          onClick={() => updateClient("authMethod", "privateKey")}
+                        >
+                          <FileKey2 size={14} aria-hidden="true" />
+                          SSH 密钥
+                        </button>
+                      </div>
+
+                      {clientForm.authMethod === "privateKey" ? (
+                        <div className="private-key-fields">
+                          <label>
+                            <FieldLabel icon={<FileKey2 size={13} />}>SSH 私钥路径</FieldLabel>
+                            <input
+                              className="glass-input"
+                              value={clientForm.privateKeyPath}
+                              disabled={busy}
+                              onChange={(event) => updateClient("privateKeyPath", event.target.value)}
+                              placeholder="~/.ssh/id_ed25519"
+                              spellCheck={false}
+                              autoComplete="off"
+                            />
+                          </label>
+                          <label>
+                            <FieldLabel icon={<KeyRound size={13} />}>私钥口令（可选）</FieldLabel>
+                            <input
+                              className="glass-input"
+                              type="password"
+                              value={clientForm.passphrase}
+                              disabled={busy}
+                              onChange={(event) => updateClient("passphrase", event.target.value)}
+                              placeholder="未加密私钥可留空"
+                              autoComplete="off"
+                            />
+                          </label>
+                        </div>
+                      ) : (
+                        <label>
+                          <FieldLabel icon={<KeyRound size={13} />}>SSH 密码</FieldLabel>
+                          <input
+                            className="glass-input"
+                            type="password"
+                            value={clientForm.password}
+                            disabled={busy}
+                            onChange={(event) => updateClient("password", event.target.value)}
+                            placeholder="输入设备 A 密码"
+                            autoComplete="current-password"
+                          />
+                        </label>
+                      )}
+
+                      <label className="remote-iperf-path-field">
+                        <FieldLabel icon={<Settings2 size={13} />}>设备 A iperf3 路径（可选）</FieldLabel>
+                        <input
+                          className="glass-input"
+                          value={clientForm.remoteIperfPath}
+                          disabled={busy}
+                          onChange={(event) => updateClient("remoteIperfPath", event.target.value)}
+                          placeholder="自动检测，例如 /opt/bin/iperf3"
+                          spellCheck={false}
+                          autoComplete="off"
+                          aria-invalid={clientRemoteIperfPathInvalid}
+                        />
+                        <span className={`field-helper ${clientRemoteIperfPathInvalid ? "is-error" : ""}`}>
+                          {clientRemoteIperfPathInvalid
+                            ? "请填写绝对路径，例如 /opt/bin/iperf3"
+                            : "该设备将运行 iperf3 client 并把实时结果回传给 Mac"}
+                        </span>
+                      </label>
+                    </motion.section>
+                  )}
+                </AnimatePresence>
+
+                <section className={remoteToRemote ? "endpoint-card" : "server-endpoint-form"}>
+                  {remoteToRemote && (
+                    <div className="endpoint-heading">
+                      <div>
+                        <span className="eyebrow">IPERF3 SERVER</span>
+                        <strong>目标服务端 B</strong>
+                      </div>
+                    </div>
+                  )}
+
+                  {remoteToRemote && (
+                    <SavedEndpointSelect
+                      value={serverSavedId}
+                      servers={savedServers}
+                      disabled={busy || savedBusy}
+                      onChange={(id) => void selectSavedServerById(id)}
+                    />
+                  )}
+
                 <div className="server-mode-picker">
                   <div className="server-mode-label">
                     <FieldLabel icon={<Server size={13} />}>服务模式</FieldLabel>
@@ -833,7 +1227,7 @@ export function SpeedWorkbench() {
                       type="button"
                       className={sshManaged ? "selected" : ""}
                       disabled={busy}
-                      onClick={() => update("serverMode", "sshManaged")}
+                      onClick={() => updateServer("serverMode", "sshManaged")}
                     >
                       SSH 自动管理
                     </button>
@@ -841,7 +1235,7 @@ export function SpeedWorkbench() {
                       type="button"
                       className={!sshManaged ? "selected" : ""}
                       disabled={busy}
-                      onClick={() => update("serverMode", "existing")}
+                      onClick={() => updateServer("serverMode", "existing")}
                     >
                       直连已有服务
                     </button>
@@ -849,13 +1243,15 @@ export function SpeedWorkbench() {
                 </div>
 
               <label>
-                <FieldLabel icon={<Radio size={13} />}>服务器地址</FieldLabel>
+                <FieldLabel icon={<Radio size={13} />}>
+                  {remoteToRemote ? "设备 B 地址" : "服务器地址"}
+                </FieldLabel>
                 <input
                   autoFocus
                   className="glass-input"
                   value={form.host}
                   disabled={busy}
-                  onChange={(event) => update("host", event.target.value)}
+                  onChange={(event) => updateServer("host", event.target.value)}
                   placeholder="192.168.1.20"
                   spellCheck={false}
                   autoComplete="off"
@@ -874,7 +1270,7 @@ export function SpeedWorkbench() {
                         max="65535"
                         value={form.sshPort}
                         disabled={busy}
-                        onChange={(event) => update("sshPort", event.target.value)}
+                        onChange={(event) => updateServer("sshPort", event.target.value)}
                       />
                     </label>
                     <label>
@@ -886,7 +1282,7 @@ export function SpeedWorkbench() {
                         max="65535"
                         value={form.iperfPort}
                         disabled={busy}
-                        onChange={(event) => update("iperfPort", event.target.value)}
+                        onChange={(event) => updateServer("iperfPort", event.target.value)}
                       />
                     </label>
                   </div>
@@ -896,7 +1292,7 @@ export function SpeedWorkbench() {
                       className="glass-input"
                       value={form.username}
                       disabled={busy}
-                      onChange={(event) => update("username", event.target.value)}
+                      onChange={(event) => updateServer("username", event.target.value)}
                       placeholder="ubuntu"
                       autoComplete="username"
                     />
@@ -906,7 +1302,7 @@ export function SpeedWorkbench() {
                       type="button"
                       className={form.authMethod === "password" ? "selected" : ""}
                       disabled={busy}
-                      onClick={() => update("authMethod", "password")}
+                      onClick={() => updateServer("authMethod", "password")}
                     >
                       <KeyRound size={14} aria-hidden="true" />
                       密码登录
@@ -915,7 +1311,7 @@ export function SpeedWorkbench() {
                       type="button"
                       className={form.authMethod === "privateKey" ? "selected" : ""}
                       disabled={busy}
-                      onClick={() => update("authMethod", "privateKey")}
+                      onClick={() => updateServer("authMethod", "privateKey")}
                     >
                       <FileKey2 size={14} aria-hidden="true" />
                       SSH 密钥
@@ -936,7 +1332,7 @@ export function SpeedWorkbench() {
                             className="glass-input"
                             value={form.privateKeyPath}
                             disabled={busy}
-                            onChange={(event) => update("privateKeyPath", event.target.value)}
+                            onChange={(event) => updateServer("privateKeyPath", event.target.value)}
                             placeholder="~/.ssh/id_ed25519"
                             spellCheck={false}
                             autoComplete="off"
@@ -949,7 +1345,7 @@ export function SpeedWorkbench() {
                             type="password"
                             value={form.passphrase}
                             disabled={busy}
-                            onChange={(event) => update("passphrase", event.target.value)}
+                            onChange={(event) => updateServer("passphrase", event.target.value)}
                             placeholder="未加密私钥可留空"
                             autoComplete="off"
                           />
@@ -968,7 +1364,7 @@ export function SpeedWorkbench() {
                           type="password"
                           value={form.password}
                           disabled={busy}
-                          onChange={(event) => update("password", event.target.value)}
+                          onChange={(event) => updateServer("password", event.target.value)}
                           placeholder="输入密码"
                           autoComplete="current-password"
                         />
@@ -981,7 +1377,7 @@ export function SpeedWorkbench() {
                       className="glass-input"
                       value={form.remoteIperfPath}
                       disabled={busy}
-                      onChange={(event) => update("remoteIperfPath", event.target.value)}
+                      onChange={(event) => updateServer("remoteIperfPath", event.target.value)}
                       placeholder="自动检测，例如 /opt/bin/iperf3"
                       spellCheck={false}
                       autoComplete="off"
@@ -1008,10 +1404,12 @@ export function SpeedWorkbench() {
                     max="65535"
                     value={form.iperfPort}
                     disabled={busy}
-                    onChange={(event) => update("iperfPort", event.target.value)}
+                    onChange={(event) => updateServer("iperfPort", event.target.value)}
                   />
                 </label>
               )}
+
+                </section>
 
                 </div>
 
@@ -1191,7 +1589,11 @@ export function SpeedWorkbench() {
             </div>
 
             <div className="network-stage">
-              <MacGlyph active={busy} />
+              <MacGlyph
+                active={busy}
+                label={remoteToRemote ? clientForm.host.trim() || "设备 A" : "此 Mac"}
+                subtitle={remoteToRemote ? "Remote client" : "Local client"}
+              />
               <EnergyLink
                 direction={activeDirection}
                 active={running}
@@ -1347,9 +1749,9 @@ export function SpeedWorkbench() {
               transition={{ type: "spring", stiffness: 300, damping: 28 }}
             >
               <div className="confirm-icon">
-                {prompt.kind === "hostKeyMismatch" ? (
+                {prompt.kind === "hostKeyMismatch" || prompt.kind === "clientHostKeyMismatch" ? (
                   <ShieldAlert size={21} />
-                ) : prompt.kind === "iperf3Missing" ? (
+                ) : prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing" ? (
                   <PackageSearch size={21} />
                 ) : prompt.kind === "serverUnavailable" ? (
                   <CircleAlert size={21} />
@@ -1363,10 +1765,12 @@ export function SpeedWorkbench() {
               <div className="confirm-actions">
                 {prompt.kind !== "serverUnavailable" && (
                   <button type="button" onClick={rejectPrompt}>
-                    {prompt.kind === "iperf3Missing" ? "稍后处理" : "取消"}
+                    {prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing"
+                      ? "稍后处理"
+                      : "取消"}
                   </button>
                 )}
-                {prompt.kind === "iperf3Missing" && prompt.detail && (
+                {(prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing") && prompt.detail && (
                   <button type="button" onClick={copyPromptDetail}>
                     {promptDetailCopied ? <Check size={13} /> : <Copy size={13} />}
                     {promptDetailCopied ? "已复制" : "复制命令"}
@@ -1378,9 +1782,9 @@ export function SpeedWorkbench() {
                   </button>
                 ) : (
                   <button type="button" className="confirm-primary" onClick={confirmPrompt} autoFocus>
-                    {prompt.kind === "hostKeyMismatch"
+                    {prompt.kind === "hostKeyMismatch" || prompt.kind === "clientHostKeyMismatch"
                       ? "信任并继续"
-                      : prompt.kind === "iperf3Missing"
+                      : prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing"
                         ? "已安装，重新检测"
                         : "复用并继续"}
                   </button>
