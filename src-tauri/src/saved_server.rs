@@ -1,6 +1,7 @@
 use crate::model::{validate_remote_iperf_path, ServerMode, SshAuthMethod};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -8,12 +9,26 @@ use std::{
 use tauri::{AppHandle, Manager};
 
 #[cfg(target_os = "macos")]
+use std::sync::{Mutex, MutexGuard};
+
+#[cfg(target_os = "macos")]
 use security_framework::passwords::{
     delete_generic_password, get_generic_password, set_generic_password,
 };
 
 const KEYCHAIN_SERVICE: &str = "com.anti2077.quantumleap.saved-server";
+const KEYCHAIN_VAULT_ACCOUNT: &str = "credential-vault-v1";
+const KEYCHAIN_ITEM_NOT_FOUND: i32 = -25300;
 const METADATA_FILE: &str = "saved-servers.json";
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+struct CredentialVault {
+    #[serde(default)]
+    credentials: BTreeMap<String, String>,
+}
+
+#[cfg(target_os = "macos")]
+static KEYCHAIN_VAULT_CACHE: Mutex<Option<CredentialVault>> = Mutex::new(None);
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -119,22 +134,85 @@ fn new_id() -> String {
 }
 
 #[cfg(target_os = "macos")]
+fn lock_keychain_vault() -> Result<MutexGuard<'static, Option<CredentialVault>>, String> {
+    KEYCHAIN_VAULT_CACHE
+        .lock()
+        .map_err(|_| "macOS 钥匙串保险库状态不可用".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn read_keychain_vault() -> Result<CredentialVault, String> {
+    match get_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_VAULT_ACCOUNT) {
+        Ok(contents) => serde_json::from_slice(&contents)
+            .map_err(|error| format!("解析 macOS 钥匙串保险库失败：{error}")),
+        Err(error) if error.code() == KEYCHAIN_ITEM_NOT_FOUND => Ok(CredentialVault::default()),
+        Err(error) => Err(format!("读取 macOS 钥匙串保险库失败：{error}")),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn write_keychain_vault(vault: &CredentialVault) -> Result<(), String> {
+    let contents = serde_json::to_vec(vault)
+        .map_err(|error| format!("序列化 macOS 钥匙串保险库失败：{error}"))?;
+    set_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_VAULT_ACCOUNT, &contents)
+        .map_err(|error| format!("保存密码到 macOS 钥匙串保险库失败：{error}"))
+}
+
+#[cfg(target_os = "macos")]
+fn ensure_keychain_vault_loaded(
+    cache: &mut Option<CredentialVault>,
+) -> Result<&mut CredentialVault, String> {
+    if cache.is_none() {
+        *cache = Some(read_keychain_vault()?);
+    }
+    cache
+        .as_mut()
+        .ok_or_else(|| "macOS 钥匙串保险库状态不可用".to_string())
+}
+
+#[cfg(target_os = "macos")]
 fn keychain_set(id: &str, password: &str) -> Result<(), String> {
-    set_generic_password(KEYCHAIN_SERVICE, id, password.as_bytes())
-        .map_err(|error| format!("保存密码到 macOS 钥匙串失败：{error}"))
+    let mut cache = lock_keychain_vault()?;
+    let mut updated = ensure_keychain_vault_loaded(&mut cache)?.clone();
+    updated
+        .credentials
+        .insert(id.to_string(), password.to_string());
+    write_keychain_vault(&updated)?;
+    *cache = Some(updated);
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
 fn keychain_get(id: &str) -> Result<String, String> {
-    get_generic_password(KEYCHAIN_SERVICE, id)
-        .map_err(|error| format!("从 macOS 钥匙串读取密码失败：{error}"))
-        .and_then(|password| {
-            String::from_utf8(password).map_err(|_| "钥匙串中的密码不是有效文本".to_string())
-        })
+    let mut cache = lock_keychain_vault()?;
+    let vault = ensure_keychain_vault_loaded(&mut cache)?;
+    if let Some(password) = vault.credentials.get(id) {
+        return Ok(password.clone());
+    }
+
+    // Older releases stored one Keychain item per server. Migrate each legacy
+    // item lazily so existing users keep their saved credentials.
+    let legacy = get_generic_password(KEYCHAIN_SERVICE, id)
+        .map_err(|error| format!("从旧版 macOS 钥匙串条目读取密码失败：{error}"))?;
+    let password =
+        String::from_utf8(legacy).map_err(|_| "旧版钥匙串中的密码不是有效文本".to_string())?;
+    let mut updated = vault.clone();
+    updated.credentials.insert(id.to_string(), password.clone());
+    write_keychain_vault(&updated)?;
+    *cache = Some(updated);
+    Ok(password)
 }
 
 #[cfg(target_os = "macos")]
 fn keychain_delete(id: &str) {
+    if let Ok(mut cache) = lock_keychain_vault() {
+        if let Ok(vault) = ensure_keychain_vault_loaded(&mut cache) {
+            let mut updated = vault.clone();
+            if updated.credentials.remove(id).is_some() && write_keychain_vault(&updated).is_ok() {
+                *cache = Some(updated);
+            }
+        }
+    }
     let _ = delete_generic_password(KEYCHAIN_SERVICE, id);
 }
 
@@ -348,5 +426,22 @@ mod tests {
             serde_json::from_slice(legacy).expect("read legacy metadata");
 
         assert_eq!(restored[0].note, "");
+    }
+
+    #[test]
+    fn credential_vault_keeps_all_passwords_in_one_payload() {
+        let mut vault = CredentialVault::default();
+        vault
+            .credentials
+            .insert("server-1".into(), "first-secret".into());
+        vault
+            .credentials
+            .insert("server-2".into(), "second-secret".into());
+
+        let encoded = serde_json::to_vec(&vault).expect("serialize vault");
+        let restored: CredentialVault = serde_json::from_slice(&encoded).expect("read vault");
+
+        assert_eq!(restored, vault);
+        assert_eq!(restored.credentials.len(), 2);
     }
 }

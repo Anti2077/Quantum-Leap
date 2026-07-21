@@ -1,6 +1,9 @@
 .DS_Store
 node_modules/
 dist/
+test_file/
+*.app/
 src-tauri/target/
 *.xcuserstate
 xcuserdata/
+AGENTS.md

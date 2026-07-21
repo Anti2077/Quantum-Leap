@@ -5,6 +5,7 @@ import Activity from "lucide-react/dist/esm/icons/activity.js";
 import ArrowDownToLine from "lucide-react/dist/esm/icons/arrow-down-to-line.js";
 import ArrowRightLeft from "lucide-react/dist/esm/icons/arrow-right-left.js";
 import ArrowUpFromLine from "lucide-react/dist/esm/icons/arrow-up-from-line.js";
+import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
 import CircleAlert from "lucide-react/dist/esm/icons/circle-alert.js";
 import BookMarked from "lucide-react/dist/esm/icons/book-marked.js";
 import Clock3 from "lucide-react/dist/esm/icons/clock-3.js";
@@ -12,6 +13,7 @@ import Check from "lucide-react/dist/esm/icons/check.js";
 import Copy from "lucide-react/dist/esm/icons/copy.js";
 import FileKey2 from "lucide-react/dist/esm/icons/file-key-2.js";
 import Gauge from "lucide-react/dist/esm/icons/gauge.js";
+import GripVertical from "lucide-react/dist/esm/icons/grip-vertical.js";
 import KeyRound from "lucide-react/dist/esm/icons/key-round.js";
 import Layers3 from "lucide-react/dist/esm/icons/layers-3.js";
 import Network from "lucide-react/dist/esm/icons/network.js";
@@ -33,8 +35,10 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from "react";
 import {
@@ -148,6 +152,11 @@ const STANDARD_DURATION_SECONDS = 10;
 const STANDARD_PARALLEL_STREAMS = 8;
 const SAMPLE_HISTORY_LIMIT = 280;
 const BANDWIDTH_UNIT_KEY = "pulse.bandwidth-unit";
+const LAYOUT_SPLIT_KEY = "pulse.layout-split";
+const DEFAULT_LAYOUT_SPLIT = 0.32;
+const MIN_LAYOUT_SPLIT = 0.25;
+const MAX_LAYOUT_SPLIT = 0.5;
+const LAYOUT_DIVIDER_WIDTH = 20;
 type DesignPreviewTheme = "air" | "frost" | "crystal";
 
 function designPreviewSamples(): SamplePoint[] {
@@ -172,6 +181,17 @@ function savedBandwidthUnit(): BandwidthUnit {
     return localStorage.getItem(BANDWIDTH_UNIT_KEY) === "Gbps" ? "Gbps" : "Mbps";
   } catch {
     return "Mbps";
+  }
+}
+
+function savedLayoutSplit(): number {
+  try {
+    const value = Number(localStorage.getItem(LAYOUT_SPLIT_KEY));
+    return Number.isFinite(value)
+      ? Math.min(MAX_LAYOUT_SPLIT, Math.max(MIN_LAYOUT_SPLIT, value))
+      : DEFAULT_LAYOUT_SPLIT;
+  } catch {
+    return DEFAULT_LAYOUT_SPLIT;
   }
 }
 
@@ -296,6 +316,9 @@ export function SpeedWorkbench() {
   );
   const [clientSavedId, setClientSavedId] = useState("");
   const [serverSavedId, setServerSavedId] = useState("");
+  const [endpointEditor, setEndpointEditor] = useState<"client" | "server" | null>(null);
+  const [clientAdvancedOpen, setClientAdvancedOpen] = useState(false);
+  const [serverAdvancedOpen, setServerAdvancedOpen] = useState(false);
   const [samples, setSamples] = useState<SamplePoint[]>(() =>
     designPreviewTheme ? designPreviewSamples() : []
   );
@@ -346,6 +369,8 @@ export function SpeedWorkbench() {
   const [savedBusy, setSavedBusy] = useState(false);
   const [promptDetailCopied, setPromptDetailCopied] = useState(false);
   const [bandwidthUnit, setBandwidthUnit] = useState<BandwidthUnit>(savedBandwidthUnit);
+  const [layoutSplit, setLayoutSplit] = useState(savedLayoutSplit);
+  const [layoutResizing, setLayoutResizing] = useState(false);
   const [status, setStatus] = useState<SpeedStateEvent>(() =>
     designPreviewTheme
       ? resultPreview
@@ -354,6 +379,7 @@ export function SpeedWorkbench() {
       : { phase: "idle", message: "等待连接服务器" }
   );
   const requestRef = useRef<SpeedTestRequest | null>(null);
+  const appContentRef = useRef<HTMLElement>(null);
   const savedControlRef = useRef<HTMLDivElement>(null);
   const lastGoodSampleRef = useRef<Partial<Record<TransferDirection, SpeedSample>>>({});
 
@@ -361,6 +387,36 @@ export function SpeedWorkbench() {
     if (event.button !== 0 || (event.target as Element).closest("button, input, select, textarea, a")) return;
     event.preventDefault();
     void getCurrentWindow().startDragging().catch(() => undefined);
+  };
+
+  const updateLayoutSplit = (clientX: number) => {
+    const bounds = appContentRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const availableWidth = Math.max(1, bounds.width - LAYOUT_DIVIDER_WIDTH);
+    const next = (clientX - bounds.left - LAYOUT_DIVIDER_WIDTH / 2) / availableWidth;
+    setLayoutSplit(Math.min(MAX_LAYOUT_SPLIT, Math.max(MIN_LAYOUT_SPLIT, next)));
+  };
+
+  const startLayoutResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setLayoutResizing(true);
+    updateLayoutSplit(event.clientX);
+  };
+
+  const moveLayoutResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!layoutResizing) return;
+    event.preventDefault();
+    updateLayoutSplit(event.clientX);
+  };
+
+  const stopLayoutResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!layoutResizing) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setLayoutResizing(false);
   };
 
   useEffect(() => {
@@ -442,6 +498,14 @@ export function SpeedWorkbench() {
   }, [bandwidthUnit]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(LAYOUT_SPLIT_KEY, layoutSplit.toString());
+    } catch {
+      // The adjusted layout still applies for this session when storage is unavailable.
+    }
+  }, [layoutSplit]);
+
+  useEffect(() => {
     if (savedMenuOpen) return;
     setSavedNoteEditorOpen(false);
     setSavedNoteDraft("");
@@ -468,6 +532,8 @@ export function SpeedWorkbench() {
                 ? "测速未开始：设备缺少 iperf3"
                 : "已取消本次连接"
         });
+      } else if (endpointEditor) {
+        setEndpointEditor(null);
       } else {
         setSavedMenuOpen(false);
       }
@@ -478,7 +544,7 @@ export function SpeedWorkbench() {
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [prompt, savedMenuOpen]);
+  }, [endpointEditor, prompt, savedMenuOpen]);
 
   const busy = previewDirection != null || ["starting", "running", "stopping"].includes(status.phase);
   const running = previewDirection != null || status.phase === "running";
@@ -579,6 +645,9 @@ export function SpeedWorkbench() {
 
   const update = <K extends keyof ConnectionForm>(key: K, value: ConnectionForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
+    if (key === "testTopology" && value !== "remoteToRemote") {
+      setEndpointEditor(null);
+    }
   };
 
   const updateServer = <K extends keyof ConnectionForm>(key: K, value: ConnectionForm[K]) => {
@@ -882,7 +951,13 @@ export function SpeedWorkbench() {
         </div>
       </header>
 
-      <main className="app-content">
+      <main
+        ref={appContentRef}
+        className={`app-content ${layoutResizing ? "is-resizing" : ""}`}
+        style={{
+          "--connection-width": `calc(${layoutSplit * 100}% - ${layoutSplit * LAYOUT_DIVIDER_WIDTH}px)`
+        } as CSSProperties}
+      >
         <aside className="connection-column">
           <GlassPanel className="connection-panel">
             <div className="panel-heading">
@@ -1000,20 +1075,7 @@ export function SpeedWorkbench() {
             </div>
 
               <form onSubmit={submit} className="connection-form">
-                <div className="connection-scroll-region">
-                <div className="topology-picker">
-                  <div className="server-mode-label">
-                    <FieldLabel icon={<Network size={13} />}>测速拓扑</FieldLabel>
-                    <span className="mode-help" tabIndex={0} aria-label="测速拓扑说明">
-                      <Info size={14} aria-hidden="true" />
-                      <span className="mode-tooltip" role="tooltip">
-                        <strong>Mac ↔ 服务器</strong>
-                        <span>沿用当前模式，Mac 本机运行 iperf3 client。</span>
-                        <strong>设备 A ↔ 设备 B</strong>
-                        <span>Mac 只通过 SSH 控制两端，测速流量不会经过 Mac。</span>
-                      </span>
-                    </span>
-                  </div>
+                <div className="connection-fixed-top-controls">
                   <div className="test-mode-tabs topology-tabs" aria-label="测速拓扑">
                     <button
                       type="button"
@@ -1021,7 +1083,7 @@ export function SpeedWorkbench() {
                       disabled={busy}
                       onClick={() => update("testTopology", "localToRemote")}
                     >
-                      Mac ↔ 服务器
+                      本机测速
                     </button>
                     <button
                       type="button"
@@ -1029,36 +1091,69 @@ export function SpeedWorkbench() {
                       disabled={busy}
                       onClick={() => update("testTopology", "remoteToRemote")}
                     >
-                      设备 A ↔ 设备 B
+                      双端互测
                     </button>
                   </div>
                 </div>
 
-                <AnimatePresence initial={false}>
-                  {remoteToRemote && (
-                    <motion.section
-                      className="endpoint-card"
-                      initial={{ opacity: 0, height: 0, y: -5 }}
-                      animate={{ opacity: 1, height: "auto", y: 0 }}
-                      exit={{ opacity: 0, height: 0, y: -5 }}
-                    >
-                      <div className="endpoint-heading">
-                        <div>
-                          <span className="eyebrow">IPERF3 CLIENT</span>
-                          <strong>测速发起端 A</strong>
-                        </div>
-                        <button
-                          type="button"
-                          className="swap-endpoints"
-                          onClick={swapRemoteEndpoints}
-                          disabled={!sshManaged || busy}
-                          title={sshManaged ? "交换 A/B 两端" : "服务端使用 SSH 自动管理时才能交换"}
-                        >
-                          <ArrowRightLeft size={14} />
-                          交换
-                        </button>
-                      </div>
+                <div className="connection-scroll-region">
 
+                {remoteToRemote && (
+                  <section className="endpoint-overview" aria-label="双端设备">
+                    <div className="endpoint-overview-row">
+                      <button
+                        type="button"
+                        className={`endpoint-summary-card ${endpointEditor === "client" ? "is-active" : ""}`}
+                        disabled={busy}
+                        onClick={() => setEndpointEditor((current) => current === "client" ? null : "client")}
+                        aria-label="编辑设备 A 发起端"
+                        aria-expanded={endpointEditor === "client"}
+                      >
+                        <span className="endpoint-summary-copy">
+                          <span className="endpoint-summary-role">发起端</span>
+                          <strong>{clientForm.host.trim() || "未配置 IP"}</strong>
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="endpoint-swap-button"
+                        onClick={swapRemoteEndpoints}
+                        disabled={!sshManaged || busy}
+                        title={sshManaged ? "交换 A/B 两端" : "服务端使用 SSH 自动管理时才能交换"}
+                        aria-label="交换设备 A 和设备 B"
+                      >
+                        <ArrowRightLeft size={17} aria-hidden="true" />
+                      </button>
+
+                      <button
+                        type="button"
+                        className={`endpoint-summary-card ${endpointEditor === "server" ? "is-active" : ""}`}
+                        disabled={busy}
+                        onClick={() => setEndpointEditor((current) => current === "server" ? null : "server")}
+                        aria-label="编辑设备 B 服务端"
+                        aria-expanded={endpointEditor === "server"}
+                      >
+                        <span className="endpoint-summary-copy">
+                          <span className="endpoint-summary-role">服务端</span>
+                          <strong>{form.host.trim() || "未配置 IP"}</strong>
+                        </span>
+                      </button>
+                    </div>
+                  </section>
+                )}
+
+                <AnimatePresence initial={false}>
+                  {remoteToRemote && endpointEditor === "client" && (
+                    <motion.section
+                      className="endpoint-card endpoint-editor-dialog editor-client"
+                      role="region"
+                      aria-label="发起端配置"
+                      initial={{ opacity: 0, height: 0, y: -8 }}
+                      animate={{ opacity: 1, height: "auto", y: 0 }}
+                      exit={{ opacity: 0, height: 0, y: -8 }}
+                      transition={{ duration: 0.18, ease: "easeOut" }}
+                    >
                       <SavedEndpointSelect
                         value={clientSavedId}
                         servers={savedServers.filter((server) => server.serverMode === "sshManaged")}
@@ -1168,38 +1263,58 @@ export function SpeedWorkbench() {
                         </label>
                       )}
 
-                      <label className="remote-iperf-path-field">
-                        <FieldLabel icon={<Settings2 size={13} />}>设备 A iperf3 路径（可选）</FieldLabel>
-                        <input
-                          className="glass-input"
-                          value={clientForm.remoteIperfPath}
+                      <div className="advanced-disclosure">
+                        <button
+                          type="button"
+                          className={`advanced-disclosure-toggle ${clientAdvancedOpen ? "is-open" : ""}`}
+                          onClick={() => setClientAdvancedOpen((open) => !open)}
                           disabled={busy}
-                          onChange={(event) => updateClient("remoteIperfPath", event.target.value)}
-                          placeholder="自动检测，例如 /opt/bin/iperf3"
-                          spellCheck={false}
-                          autoComplete="off"
-                          aria-invalid={clientRemoteIperfPathInvalid}
-                        />
-                        <span className={`field-helper ${clientRemoteIperfPathInvalid ? "is-error" : ""}`}>
-                          {clientRemoteIperfPathInvalid
-                            ? "请填写绝对路径，例如 /opt/bin/iperf3"
-                            : "该设备将运行 iperf3 client 并把实时结果回传给 Mac"}
-                        </span>
-                      </label>
+                          aria-expanded={clientAdvancedOpen}
+                        >
+                          <span><Settings2 size={14} aria-hidden="true" />高级选项</span>
+                          <span className="advanced-disclosure-meta">
+                            {clientForm.remoteIperfPath.trim() ? "已指定路径" : "自动检测"}
+                            <ChevronDown size={14} aria-hidden="true" />
+                          </span>
+                        </button>
+                        {clientAdvancedOpen && (
+                          <label className="remote-iperf-path-field">
+                            <FieldLabel icon={<Settings2 size={13} />}>设备 A iperf3 路径</FieldLabel>
+                            <input
+                              className="glass-input"
+                              value={clientForm.remoteIperfPath}
+                              disabled={busy}
+                              onChange={(event) => updateClient("remoteIperfPath", event.target.value)}
+                              placeholder="自动检测，例如 /opt/bin/iperf3"
+                              spellCheck={false}
+                              autoComplete="off"
+                              aria-invalid={clientRemoteIperfPathInvalid}
+                            />
+                            <span className={`field-helper ${clientRemoteIperfPathInvalid ? "is-error" : ""}`}>
+                              {clientRemoteIperfPathInvalid
+                                ? "请填写绝对路径，例如 /opt/bin/iperf3"
+                                : "留空会自动搜索 PATH、QNAP /opt/bin 和常见 Entware 目录"}
+                            </span>
+                          </label>
+                        )}
+                      </div>
                     </motion.section>
                   )}
                 </AnimatePresence>
 
-                <section className={remoteToRemote ? "endpoint-card" : "server-endpoint-form"}>
-                  {remoteToRemote && (
-                    <div className="endpoint-heading">
-                      <div>
-                        <span className="eyebrow">IPERF3 SERVER</span>
-                        <strong>目标服务端 B</strong>
-                      </div>
-                    </div>
-                  )}
-
+                <AnimatePresence initial={false}>
+                {(!remoteToRemote || endpointEditor === "server") && (
+                <motion.section
+                  className={remoteToRemote
+                    ? "endpoint-card endpoint-editor-dialog editor-server"
+                    : "server-endpoint-form"}
+                  role={remoteToRemote ? "region" : undefined}
+                  aria-label={remoteToRemote ? "服务端配置" : undefined}
+                  initial={remoteToRemote ? { opacity: 0, height: 0, y: -8 } : false}
+                  animate={{ opacity: 1, height: "auto", y: 0 }}
+                  exit={remoteToRemote ? { opacity: 0, height: 0, y: -8 } : undefined}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
+                >
                   {remoteToRemote && (
                     <SavedEndpointSelect
                       value={serverSavedId}
@@ -1371,28 +1486,45 @@ export function SpeedWorkbench() {
                       </motion.label>
                     )}
                   </AnimatePresence>
-                  <label className="remote-iperf-path-field">
-                    <FieldLabel icon={<Settings2 size={13} />}>远端 iperf3 路径（可选）</FieldLabel>
-                    <input
-                      className="glass-input"
-                      value={form.remoteIperfPath}
+                  <div className="advanced-disclosure">
+                    <button
+                      type="button"
+                      className={`advanced-disclosure-toggle ${serverAdvancedOpen ? "is-open" : ""}`}
+                      onClick={() => setServerAdvancedOpen((open) => !open)}
                       disabled={busy}
-                      onChange={(event) => updateServer("remoteIperfPath", event.target.value)}
-                      placeholder="自动检测，例如 /opt/bin/iperf3"
-                      spellCheck={false}
-                      autoComplete="off"
-                      aria-invalid={remoteIperfPathInvalid}
-                      aria-describedby="remote-iperf-path-help"
-                    />
-                    <span
-                      id="remote-iperf-path-help"
-                      className={`field-helper ${remoteIperfPathInvalid ? "is-error" : ""}`}
+                      aria-expanded={serverAdvancedOpen}
                     >
-                      {remoteIperfPathInvalid
-                        ? "请填写绝对路径，例如 /opt/bin/iperf3"
-                        : "留空会自动搜索 PATH、QNAP /opt/bin 和常见 Entware 目录"}
-                    </span>
-                  </label>
+                      <span><Settings2 size={14} aria-hidden="true" />高级选项</span>
+                      <span className="advanced-disclosure-meta">
+                        {form.remoteIperfPath.trim() ? "已指定路径" : "自动检测"}
+                        <ChevronDown size={14} aria-hidden="true" />
+                      </span>
+                    </button>
+                    {serverAdvancedOpen && (
+                      <label className="remote-iperf-path-field">
+                        <FieldLabel icon={<Settings2 size={13} />}>设备 B iperf3 路径</FieldLabel>
+                        <input
+                          className="glass-input"
+                          value={form.remoteIperfPath}
+                          disabled={busy}
+                          onChange={(event) => updateServer("remoteIperfPath", event.target.value)}
+                          placeholder="自动检测，例如 /opt/bin/iperf3"
+                          spellCheck={false}
+                          autoComplete="off"
+                          aria-invalid={remoteIperfPathInvalid}
+                          aria-describedby="remote-iperf-path-help"
+                        />
+                        <span
+                          id="remote-iperf-path-help"
+                          className={`field-helper ${remoteIperfPathInvalid ? "is-error" : ""}`}
+                        >
+                          {remoteIperfPathInvalid
+                            ? "请填写绝对路径，例如 /opt/bin/iperf3"
+                            : "留空会自动搜索 PATH、QNAP /opt/bin 和常见 Entware 目录"}
+                        </span>
+                      </label>
+                    )}
+                  </div>
                 </>
               ) : (
                 <label>
@@ -1409,7 +1541,9 @@ export function SpeedWorkbench() {
                 </label>
               )}
 
-                </section>
+                </motion.section>
+                )}
+                </AnimatePresence>
 
                 </div>
 
@@ -1547,6 +1681,33 @@ export function SpeedWorkbench() {
             </form>
           </GlassPanel>
         </aside>
+
+        <div
+          className="layout-resizer"
+          role="separator"
+          tabIndex={0}
+          aria-label="调整连接信息与测速结果的宽度"
+          aria-orientation="vertical"
+          aria-valuemin={Math.round(MIN_LAYOUT_SPLIT * 100)}
+          aria-valuemax={Math.round(MAX_LAYOUT_SPLIT * 100)}
+          aria-valuenow={Math.round(layoutSplit * 100)}
+          title="拖动调整宽度，双击恢复默认"
+          onDoubleClick={() => setLayoutSplit(DEFAULT_LAYOUT_SPLIT)}
+          onPointerDown={startLayoutResize}
+          onPointerMove={moveLayoutResize}
+          onPointerUp={stopLayoutResize}
+          onPointerCancel={stopLayoutResize}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            const direction = event.key === "ArrowLeft" ? -1 : 1;
+            setLayoutSplit((current) =>
+              Math.min(MAX_LAYOUT_SPLIT, Math.max(MIN_LAYOUT_SPLIT, current + direction * 0.02))
+            );
+          }}
+        >
+          <GripVertical size={15} aria-hidden="true" />
+        </div>
 
         <section className="speed-column">
           <GlassPanel
