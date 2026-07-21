@@ -7,8 +7,9 @@ src-tauri/target/
 *.xcuserstate
 xcuserdata/
 
-# Local AI agent instructions and workspace state
+# Local workspace state
 AGENTS.md
+CLAUDE.md
 .agent/
 .agents/
 .claude/
