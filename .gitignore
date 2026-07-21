@@ -6,4 +6,11 @@ test_file/
 src-tauri/target/
 *.xcuserstate
 xcuserdata/
+
+# Local AI agent instructions and workspace state
 AGENTS.md
+CLAUDE.md
+.agent/
+.agents/
+.claude/
+.codex/
