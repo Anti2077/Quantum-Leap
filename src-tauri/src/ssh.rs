@@ -10,6 +10,7 @@ use std::{
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const SESSION_TIMEOUT_MS: u32 = 12_000;
+pub(crate) const CLIENT_PID_MARKER: &str = "IPERF3_CLIENT_PID:";
 const REMOTE_IPERF_CANDIDATES: &[&str] = &[
     "/opt/bin/iperf3",
     "/usr/local/bin/iperf3",
@@ -131,7 +132,7 @@ fn resolve_addresses(remote: &RemoteTarget) -> Result<Vec<SocketAddr>, SshError>
         .map_err(|err| SshError::Message(format!("无法解析服务器地址：{err}")))
 }
 
-fn connect(remote: &RemoteTarget) -> Result<Session, SshError> {
+pub(crate) fn connect(remote: &RemoteTarget) -> Result<Session, SshError> {
     let addresses = resolve_addresses(remote)?;
     if addresses.is_empty() {
         return Err(SshError::Message("服务器地址没有可用的网络端点".into()));
@@ -280,20 +281,18 @@ fn run_command(session: &Session, command: &str) -> Result<(String, String, i32)
     Ok((stdout, stderr, exit_status))
 }
 
-fn shell_quote(value: &str) -> String {
+pub(crate) fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-fn server_start_command(remote: &RemoteTarget, one_off: bool) -> String {
+fn remote_iperf_prelude(remote: &RemoteTarget) -> String {
     let candidates = REMOTE_IPERF_CANDIDATES
         .iter()
         .map(|path| shell_quote(path))
         .collect::<Vec<_>>()
         .join(" ");
     let custom_path = shell_quote(remote.iperf_path.trim());
-    let log_path = format!("/tmp/iperf3-ui-{}.log", remote.iperf_port);
-    let one_off_flag = if one_off { "-1" } else { "" };
-    let script = format!(
+    format!(
         "IPERF3_BIN={custom_path}; \
          if [ -n \"$IPERF3_BIN\" ]; then \
            [ -x \"$IPERF3_BIN\" ] || {{ printf 'IPERF3_PATH_INVALID:%s\\n' \"$IPERF3_BIN\" >&2; exit 126; }}; \
@@ -316,7 +315,16 @@ fn server_start_command(remote: &RemoteTarget, one_off: bool) -> String {
            elif command -v zypper >/dev/null 2>&1; then package_manager=zypper; \
            elif command -v brew >/dev/null 2>&1; then package_manager=brew; fi; \
            echo IPERF3_NOT_FOUND:$package_manager >&2; exit 127; \
-         fi; \
+         fi"
+    )
+}
+
+fn server_start_command(remote: &RemoteTarget, one_off: bool) -> String {
+    let prelude = remote_iperf_prelude(remote);
+    let log_path = format!("/tmp/iperf3-ui-{}.log", remote.iperf_port);
+    let one_off_flag = if one_off { "-1" } else { "" };
+    let script = format!(
+        "{prelude}; \
          start_iperf() {{ \
            if command -v nohup >/dev/null 2>&1; then \
              exec nohup \"$IPERF3_BIN\" -s {one_off_flag} -p {port}; \
@@ -332,6 +340,38 @@ fn server_start_command(remote: &RemoteTarget, one_off: bool) -> String {
         log = shell_quote(&log_path),
     );
     format!("sh -lc {}", shell_quote(&script))
+}
+
+pub(crate) fn remote_client_command(remote: &RemoteTarget, args: &[String]) -> String {
+    let prelude = remote_iperf_prelude(remote);
+    let arguments = args
+        .iter()
+        .map(|argument| shell_quote(argument))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let script = format!(
+        "{prelude}; \
+         printf '{CLIENT_PID_MARKER}%s\\n' \"$$\"; \
+         exec \"$IPERF3_BIN\" {arguments}"
+    );
+    format!("sh -lc {}", shell_quote(&script))
+}
+
+pub(crate) fn parse_remote_iperf_error(stderr: &str, status: i32, action: &str) -> SshError {
+    if let Some(path) = stderr
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("IPERF3_PATH_INVALID:"))
+    {
+        return SshError::Message(format!("远端 iperf3 路径不可执行：{path}"));
+    }
+    if stderr.contains("IPERF3_NOT_FOUND:") {
+        return SshError::Iperf3Missing(RemotePackageManager::from_marker(stderr));
+    }
+    if stderr.trim().is_empty() {
+        SshError::Message(format!("{action}失败（退出码 {status}）"))
+    } else {
+        SshError::Message(format!("{action}失败：{}", stderr.trim()))
+    }
 }
 
 fn parse_server_start(
@@ -357,27 +397,7 @@ fn parse_server_start(
         return Err(SshError::ExistingServer);
     }
 
-    if let Some(path) = stderr
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("IPERF3_PATH_INVALID:"))
-    {
-        return Err(SshError::Message(format!(
-            "远端 iperf3 路径不可执行：{path}"
-        )));
-    }
-
-    if stderr.contains("IPERF3_NOT_FOUND:") {
-        return Err(SshError::Iperf3Missing(RemotePackageManager::from_marker(
-            stderr,
-        )));
-    }
-
-    let detail = if stderr.trim().is_empty() {
-        format!("远端 iperf3 启动失败（退出码 {status}）")
-    } else {
-        format!("远端 iperf3 启动失败：{}", stderr.trim())
-    };
-    Err(SshError::Message(detail))
+    Err(parse_remote_iperf_error(stderr, status, "远端 iperf3 启动"))
 }
 
 pub fn start_remote_server(
@@ -452,6 +472,46 @@ pub fn cleanup_remote_server(remote: &RemoteTarget, pid: u32) -> Result<(), Stri
         Ok(())
     } else {
         Err(format!("清理远端 iperf3 失败：{}", stderr.trim()))
+    }
+}
+
+fn cleanup_remote_client_command(pid: u32, target_host: &str, port: u16) -> String {
+    let target = shell_quote(target_host);
+    let script = format!(
+        "pid={pid}; target={target}; port={port}; \
+         command_line=; \
+         if [ -r \"/proc/$pid/cmdline\" ]; then \
+           command_line=\" $(tr \"\\000\" \" \" < \"/proc/$pid/cmdline\" 2>/dev/null) \"; \
+         else \
+           command_line=\" $(ps -p \"$pid\" -o args= 2>/dev/null) \"; \
+         fi; \
+         [ -n \"${{command_line# }}\" ] || exit 0; \
+         case \"$command_line\" in *iperf3*) ;; *) exit 0 ;; esac; \
+         case \"$command_line\" in *\" -c $target \"*) ;; *) exit 0 ;; esac; \
+         case \"$command_line\" in *\" -p $port \"*) ;; *) exit 0 ;; esac; \
+         kill -TERM \"$pid\" 2>/dev/null || true; \
+         n=0; while kill -0 \"$pid\" 2>/dev/null && [ \"$n\" -lt 20 ]; do sleep 0.1; n=$((n+1)); done; \
+         if kill -0 \"$pid\" 2>/dev/null; then kill -KILL \"$pid\" 2>/dev/null || true; fi"
+    );
+    format!("sh -lc {}", shell_quote(&script))
+}
+
+pub fn cleanup_remote_client(
+    remote: &RemoteTarget,
+    pid: u32,
+    target_host: &str,
+    port: u16,
+) -> Result<(), String> {
+    if pid == 0 {
+        return Ok(());
+    }
+    let session = connect(remote).map_err(|error| error.to_string())?;
+    let command = cleanup_remote_client_command(pid, target_host, port);
+    let (_, stderr, status) = run_command(&session, &command)?;
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(format!("清理远端 iperf3 client 失败：{}", stderr.trim()))
     }
 }
 
@@ -557,6 +617,36 @@ mod tests {
         assert!(command.contains("command -v setsid"));
         assert!(command.contains("trap '\"'\"''\"'\"' HUP"));
         assert!(command.contains("-s -1 -p 5201"));
+    }
+
+    #[test]
+    fn remote_client_command_reports_pid_and_quotes_arguments() {
+        let command = remote_client_command(
+            &remote("/opt/bin/iperf3"),
+            &[
+                "-c".into(),
+                "192.168.10.20".into(),
+                "-p".into(),
+                "5201".into(),
+                "--json-stream".into(),
+            ],
+        );
+        assert!(command.contains(CLIENT_PID_MARKER));
+        assert!(command.contains("/opt/bin/iperf3"));
+        assert!(command.contains("192.168.10.20"));
+        assert!(command.contains("--json-stream"));
+    }
+
+    #[test]
+    fn cleanup_client_command_has_valid_shell_syntax() {
+        let command = cleanup_remote_client_command(u32::MAX, "192.168.10.20", u16::MAX);
+        assert!(command.contains(" -c $target "));
+        assert!(command.contains(" -p $port "));
+        assert!(std::process::Command::new("sh")
+            .args(["-c", &command])
+            .status()
+            .expect("run client cleanup shell")
+            .success());
     }
 
     #[test]

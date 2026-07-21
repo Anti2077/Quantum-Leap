@@ -38,6 +38,69 @@ pub enum ServerMode {
     Existing,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TestTopology {
+    #[default]
+    LocalToRemote,
+    RemoteToRemote,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteClientRequest {
+    pub host: String,
+    pub ssh_port: u16,
+    #[serde(default)]
+    pub remote_iperf_path: String,
+    pub username: String,
+    pub password: String,
+    pub auth_method: SshAuthMethod,
+    pub private_key_path: String,
+    pub passphrase: String,
+    pub allow_host_key_mismatch: bool,
+}
+
+impl RemoteClientRequest {
+    fn validate(&self) -> Result<(), String> {
+        if self.host.trim().is_empty() || self.host.chars().any(char::is_whitespace) {
+            return Err("请输入有效的测速发起端地址".into());
+        }
+        if self.ssh_port == 0 {
+            return Err("测速发起端 SSH 端口必须在 1 到 65535 之间".into());
+        }
+        validate_remote_iperf_path(&self.remote_iperf_path)?;
+        if self.username.trim().is_empty() {
+            return Err("请输入测速发起端 SSH 用户名".into());
+        }
+        match self.auth_method {
+            SshAuthMethod::Password if self.password.is_empty() => {
+                return Err("请输入测速发起端 SSH 密码".into());
+            }
+            SshAuthMethod::PrivateKey if self.private_key_path.trim().is_empty() => {
+                return Err("请输入测速发起端 SSH 私钥路径".into());
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub fn remote_target(&self, iperf_port: u16) -> RemoteTarget {
+        RemoteTarget {
+            host: self.host.trim().to_owned(),
+            ssh_port: self.ssh_port,
+            iperf_port,
+            iperf_path: self.remote_iperf_path.trim().to_owned(),
+            username: self.username.trim().to_owned(),
+            password: self.password.clone(),
+            auth_method: self.auth_method,
+            private_key_path: self.private_key_path.trim().to_owned(),
+            passphrase: self.passphrase.clone(),
+            allow_host_key_mismatch: self.allow_host_key_mismatch,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeedTestRequest {
@@ -59,6 +122,10 @@ pub struct SpeedTestRequest {
     pub duration_seconds: u16,
     pub reuse_existing_server: bool,
     pub allow_host_key_mismatch: bool,
+    #[serde(default)]
+    pub test_topology: TestTopology,
+    #[serde(default)]
+    pub remote_client: Option<RemoteClientRequest>,
 }
 
 impl SpeedTestRequest {
@@ -86,6 +153,12 @@ impl SpeedTestRequest {
             if self.ssh_port == 0 {
                 return Err("端口必须在 1 到 65535 之间".into());
             }
+        }
+        if self.test_topology == TestTopology::RemoteToRemote {
+            self.remote_client
+                .as_ref()
+                .ok_or_else(|| "请填写测速发起端 SSH 信息".to_string())?
+                .validate()?;
         }
         if self.test_mode == TestMode::Advanced
             && self.duration_seconds != 0
@@ -136,6 +209,12 @@ impl SpeedTestRequest {
             passphrase: self.passphrase.clone(),
             allow_host_key_mismatch: self.allow_host_key_mismatch,
         }
+    }
+
+    pub fn remote_client_target(&self) -> Option<RemoteTarget> {
+        self.remote_client
+            .as_ref()
+            .map(|client| client.remote_target(self.iperf_port))
     }
 }
 
@@ -215,6 +294,8 @@ mod tests {
             duration_seconds: 45,
             reuse_existing_server: false,
             allow_host_key_mismatch: false,
+            test_topology: TestTopology::LocalToRemote,
+            remote_client: None,
         }
     }
 
@@ -279,5 +360,29 @@ mod tests {
 
         request.remote_iperf_path = "/opt/bin/iperf3".into();
         assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn remote_to_remote_requires_a_valid_client_endpoint() {
+        let mut request = request(TestMode::Standard);
+        request.test_topology = TestTopology::RemoteToRemote;
+        assert!(request.validate().is_err());
+
+        request.remote_client = Some(RemoteClientRequest {
+            host: "10.0.0.9".into(),
+            ssh_port: 22,
+            remote_iperf_path: "/opt/bin/iperf3".into(),
+            username: "tester".into(),
+            password: "secret".into(),
+            auth_method: SshAuthMethod::Password,
+            private_key_path: String::new(),
+            passphrase: String::new(),
+            allow_host_key_mismatch: false,
+        });
+        assert!(request.validate().is_ok());
+        assert_eq!(
+            request.remote_client_target().expect("client target").host,
+            "10.0.0.9"
+        );
     }
 }
