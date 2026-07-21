@@ -148,7 +148,7 @@ fn emit_client_ssh_error(app: &AppHandle, error: SshError) {
             "clientIperf3Missing",
             "测速发起端未安装 iperf3",
             package_manager.label().map_or_else(
-                || "请登录测速发起端手动安装 iperf3 3.17 或更高版本。".to_string(),
+                || "请登录测速发起端手动安装 iperf3 3.12 或更高版本。".to_string(),
                 |label| format!("测速发起端检测到 {label}。请执行下面的命令，安装完成后重新检测。"),
             ),
             package_manager.install_command().map(str::to_string),
@@ -256,7 +256,7 @@ async fn start_speed_test(
                         "远端未安装 iperf3",
                         package_manager.label().map_or_else(
                             || {
-                                "未识别到可用的包管理器，请登录服务器手动安装 iperf3 3.17 或更高版本。"
+                                "未识别到可用的包管理器，请登录服务器手动安装 iperf3 3.12 或更高版本。"
                                     .to_string()
                             },
                             |label| {
