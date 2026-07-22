@@ -1,5 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import * as AlertDialog from "@radix-ui/react-alert-dialog";
+import * as Dialog from "@radix-ui/react-dialog";
+import * as Popover from "@radix-ui/react-popover";
 import { AnimatePresence, motion } from "framer-motion";
 import Activity from "lucide-react/dist/esm/icons/activity.js";
 import ArrowDownToLine from "lucide-react/dist/esm/icons/arrow-down-to-line.js";
@@ -165,6 +168,8 @@ const DEFAULT_LAYOUT_SPLIT = 0.32;
 const MIN_LAYOUT_SPLIT = 0.25;
 const MAX_LAYOUT_SPLIT = 0.5;
 const LAYOUT_DIVIDER_WIDTH = 20;
+const COMPACT_LAYOUT_QUERY = "(max-width: 860px)";
+const CONNECTION_FORM_ID = "connection-settings-form";
 type DesignPreviewTheme = "air" | "frost" | "crystal";
 
 function isValidIpLiteral(value: string): boolean {
@@ -211,13 +216,19 @@ function savedBandwidthUnit(): BandwidthUnit {
 
 function savedLayoutSplit(): number {
   try {
-    const value = Number(localStorage.getItem(LAYOUT_SPLIT_KEY));
+    const storedValue = localStorage.getItem(LAYOUT_SPLIT_KEY);
+    if (storedValue == null) return DEFAULT_LAYOUT_SPLIT;
+    const value = Number(storedValue);
     return Number.isFinite(value)
       ? Math.min(MAX_LAYOUT_SPLIT, Math.max(MIN_LAYOUT_SPLIT, value))
       : DEFAULT_LAYOUT_SPLIT;
   } catch {
     return DEFAULT_LAYOUT_SPLIT;
   }
+}
+
+function usesCompactLayout() {
+  return window.matchMedia(COMPACT_LAYOUT_QUERY).matches;
 }
 
 const phaseLabelKeys: Record<SpeedStateEvent["phase"], TranslationKey> = {
@@ -237,6 +248,82 @@ function FieldLabel({ icon, children }: { icon: ReactNode; children: ReactNode }
       {icon}
       {children}
     </span>
+  );
+}
+
+function ConnectionShell({
+  compact,
+  open,
+  busy,
+  status,
+  summaryLabel,
+  summaryValue,
+  configureLabel,
+  stopLabel,
+  onOpenChange,
+  onStop,
+  onNestedEscape,
+  children
+}: {
+  compact: boolean;
+  open: boolean;
+  busy: boolean;
+  status: SpeedStateEvent["phase"];
+  summaryLabel: string;
+  summaryValue: string;
+  configureLabel: string;
+  stopLabel: string;
+  onOpenChange: (open: boolean) => void;
+  onStop: () => void;
+  onNestedEscape: () => boolean;
+  children: ReactNode;
+}) {
+  if (!compact) {
+    return <aside className="connection-column">{children}</aside>;
+  }
+
+  return (
+    <div className="command-bar" aria-label={configureLabel}>
+      <div className="command-endpoint">
+        <span className={`command-status phase-${status}`} aria-hidden="true" />
+        <div>
+          <span>{summaryLabel}</span>
+          <strong>{summaryValue}</strong>
+        </div>
+      </div>
+      <div className="command-actions">
+        <button
+          type="button"
+          className="command-stop"
+          onClick={onStop}
+          disabled={!busy}
+          aria-label={stopLabel}
+          title={stopLabel}
+        >
+          <Square size={14} fill="currentColor" aria-hidden="true" />
+        </button>
+        <Dialog.Root open={open} onOpenChange={onOpenChange}>
+          <Dialog.Trigger asChild>
+            <button type="button" className="configure-trigger">
+              <Settings2 size={15} aria-hidden="true" />
+              {configureLabel}
+            </button>
+          </Dialog.Trigger>
+          <Dialog.Portal>
+            <Dialog.Overlay className="connection-drawer-overlay" />
+            <Dialog.Content
+              className="connection-drawer"
+              onEscapeKeyDown={(event) => {
+                if (!onNestedEscape()) return;
+                event.preventDefault();
+              }}
+            >
+              {children}
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      </div>
+    </div>
   );
 }
 
@@ -397,8 +484,14 @@ export function SpeedWorkbench() {
   const [savedBusy, setSavedBusy] = useState(false);
   const [promptDetailCopied, setPromptDetailCopied] = useState(false);
   const [bandwidthUnit, setBandwidthUnit] = useState<BandwidthUnit>(savedBandwidthUnit);
-  const [layoutSplit, setLayoutSplit] = useState(savedLayoutSplit);
+  const [compactLayout, setCompactLayout] = useState(usesCompactLayout);
+  const [layoutSplit, setLayoutSplit] = useState(() =>
+    usesCompactLayout() ? DEFAULT_LAYOUT_SPLIT : savedLayoutSplit()
+  );
   const [layoutResizing, setLayoutResizing] = useState(false);
+  const [connectionOpen, setConnectionOpen] = useState(
+    () => previewParameters?.get("drawerPreview") === "1"
+  );
   const [status, setStatus] = useState<SpeedStateEvent>(() =>
     designPreviewTheme
       ? resultPreview
@@ -408,7 +501,9 @@ export function SpeedWorkbench() {
   );
   const requestRef = useRef<SpeedTestRequest | null>(null);
   const appContentRef = useRef<HTMLElement>(null);
-  const savedControlRef = useRef<HTMLDivElement>(null);
+  const endpointEditorRef = useRef<HTMLElement>(null);
+  const clientAdvancedRef = useRef<HTMLDivElement>(null);
+  const serverAdvancedRef = useRef<HTMLDivElement>(null);
   const lastGoodSampleRef = useRef<Partial<Record<TransferDirection, SpeedSample>>>({});
   const previousLanguageRef = useRef(language);
 
@@ -420,6 +515,7 @@ export function SpeedWorkbench() {
   };
 
   const updateLayoutSplit = (clientX: number) => {
+    if (compactLayout) return;
     const bounds = appContentRef.current?.getBoundingClientRect();
     if (!bounds) return;
     const availableWidth = Math.max(1, bounds.width - LAYOUT_DIVIDER_WIDTH);
@@ -428,9 +524,11 @@ export function SpeedWorkbench() {
   };
 
   const startLayoutResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
+    if (compactLayout || event.button !== 0) return;
     event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
+    if (typeof event.currentTarget.setPointerCapture === "function") {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
     setLayoutResizing(true);
     updateLayoutSplit(event.clientX);
   };
@@ -443,7 +541,10 @@ export function SpeedWorkbench() {
 
   const stopLayoutResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!layoutResizing) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+    if (
+      typeof event.currentTarget.hasPointerCapture === "function" &&
+      event.currentTarget.hasPointerCapture(event.pointerId)
+    ) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     setLayoutResizing(false);
@@ -528,12 +629,24 @@ export function SpeedWorkbench() {
   }, [bandwidthUnit]);
 
   useEffect(() => {
+    const media = window.matchMedia(COMPACT_LAYOUT_QUERY);
+    const updateLayoutMode = (event: MediaQueryListEvent) => {
+      setCompactLayout(event.matches);
+      setLayoutResizing(false);
+      if (!event.matches) setConnectionOpen(false);
+    };
+    media.addEventListener("change", updateLayoutMode);
+    return () => media.removeEventListener("change", updateLayoutMode);
+  }, []);
+
+  useEffect(() => {
+    if (compactLayout) return;
     try {
       localStorage.setItem(LAYOUT_SPLIT_KEY, layoutSplit.toString());
     } catch {
       // The adjusted layout still applies for this session when storage is unavailable.
     }
-  }, [layoutSplit]);
+  }, [compactLayout, layoutSplit]);
 
   useEffect(() => {
     if (savedMenuOpen) return;
@@ -541,42 +654,24 @@ export function SpeedWorkbench() {
     setSavedNoteDraft("");
   }, [savedMenuOpen]);
 
-  useEffect(() => {
-    if (!savedMenuOpen && !prompt) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      if (savedMenuOpen && !savedControlRef.current?.contains(event.target as Node)) {
-        setSavedMenuOpen(false);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (prompt) {
-        setPrompt(null);
-        requestRef.current = null;
-        setStatus({
-          phase: prompt.kind === "serverUnavailable" ? "failed" : "cancelled",
-          message:
-            prompt.kind === "serverUnavailable"
-              ? prompt.message
-              : prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing"
-                ? t("missingIperfCancelled")
-                : t("connectionCancelled")
-        });
-      } else if (endpointEditor) {
-        setEndpointEditor(null);
-      } else {
-        setSavedMenuOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [endpointEditor, prompt, savedMenuOpen, t]);
-
   const busy = previewDirection != null || ["starting", "running", "stopping"].includes(status.phase);
+
+  useEffect(() => {
+    if (!compactLayout || !connectionOpen || !endpointEditor) return;
+    const frame = requestAnimationFrame(() => {
+      endpointEditorRef.current?.scrollIntoView({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [compactLayout, connectionOpen, endpointEditor]);
+
+  useEffect(() => {
+    if ((compactLayout && !connectionOpen) || (!clientAdvancedOpen && !serverAdvancedOpen)) return;
+    const frame = requestAnimationFrame(() => {
+      const target = clientAdvancedOpen ? clientAdvancedRef.current : serverAdvancedRef.current;
+      target?.scrollIntoView({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [clientAdvancedOpen, compactLayout, connectionOpen, serverAdvancedOpen]);
 
   useEffect(() => {
     if (previousLanguageRef.current === language) return;
@@ -703,8 +798,8 @@ export function SpeedWorkbench() {
 
   const update = <K extends keyof ConnectionForm>(key: K, value: ConnectionForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
-    if (key === "testTopology" && value !== "remoteToRemote") {
-      setEndpointEditor(null);
+    if (key === "testTopology") {
+      setEndpointEditor(value === "remoteToRemote" ? "client" : null);
     }
   };
 
@@ -948,6 +1043,7 @@ export function SpeedWorkbench() {
     setLatest(null);
     lastGoodSampleRef.current = {};
     setPrompt(null);
+    setConnectionOpen(false);
     await launch(request);
   };
 
@@ -1023,42 +1119,69 @@ export function SpeedWorkbench() {
 
       <main
         ref={appContentRef}
-        className={`app-content ${layoutResizing ? "is-resizing" : ""}`}
+        className={`app-content ${compactLayout ? "is-compact" : "is-workspace"} ${layoutResizing ? "is-resizing" : ""}`}
         style={{
           "--connection-width": `calc(${layoutSplit * 100}% - ${layoutSplit * LAYOUT_DIVIDER_WIDTH}px)`
         } as CSSProperties}
       >
-        <aside className="connection-column">
+        <ConnectionShell
+          compact={compactLayout}
+          open={connectionOpen}
+          busy={busy}
+          status={status.phase}
+          summaryLabel={remoteToRemote ? t("remoteTest") : t("serverAddress")}
+          summaryValue={form.host.trim() || t("notConnected")}
+          configureLabel={t("configureConnection")}
+          stopLabel={t("stopTest")}
+          onOpenChange={setConnectionOpen}
+          onStop={() => void stop()}
+          onNestedEscape={() => {
+            if (!endpointEditor) return false;
+            setEndpointEditor(null);
+            return true;
+          }}
+        >
           <GlassPanel className="connection-panel">
-            <div className="panel-heading">
+                    <div className="panel-heading">
               <div>
                 <span className="eyebrow">
                   {remoteToRemote ? "Dual SSH" : sshManaged ? "SSH endpoint" : "IPERF3 endpoint"}
                 </span>
-                <h1>{remoteToRemote ? t("remoteTest") : t("connectServer")}</h1>
+                {compactLayout ? (
+                  <Dialog.Title asChild>
+                    <h1>{remoteToRemote ? t("remoteTest") : t("connectServer")}</h1>
+                  </Dialog.Title>
+                ) : (
+                  <h1>{remoteToRemote ? t("remoteTest") : t("connectServer")}</h1>
+                )}
+                {compactLayout && (
+                  <Dialog.Description className="sr-only">
+                    {t("connectionPanelDescription")}
+                  </Dialog.Description>
+                )}
               </div>
-              <div className="saved-server-control" ref={savedControlRef}>
-                <button
-                  type="button"
-                  className={savedMenuOpen ? "saved-server-trigger active" : "saved-server-trigger"}
-                  onClick={() => {
-                    setSettingsOpen(false);
-                    setSavedMenuOpen((current) => !current);
-                  }}
-                  disabled={busy}
-                  title={t("savedServers")}
-                >
-                  <BookMarked size={15} aria-hidden="true" />
-                  {t("savedServers")}
-                </button>
-                <AnimatePresence>
-                  {savedMenuOpen && (
-                    <motion.div
-                      className="saved-server-menu"
-                      initial={{ opacity: 0, y: -6, scale: 0.98 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -5, scale: 0.98 }}
-                    >
+              <div className="drawer-heading-actions">
+                <Popover.Root open={savedMenuOpen} onOpenChange={setSavedMenuOpen}>
+                  <div className="saved-server-control">
+                    <Popover.Trigger asChild>
+                      <button
+                        type="button"
+                        className={savedMenuOpen ? "saved-server-trigger active" : "saved-server-trigger"}
+                        disabled={busy}
+                        title={t("savedServers")}
+                      >
+                        <BookMarked size={15} aria-hidden="true" />
+                        {t("savedServers")}
+                      </button>
+                    </Popover.Trigger>
+                    <Popover.Portal>
+                      <Popover.Content
+                        className="saved-server-menu"
+                        side="bottom"
+                        align="end"
+                        sideOffset={8}
+                        collisionPadding={12}
+                      >
                       <div className="saved-menu-heading">
                         <strong>{t("savedServers")}</strong>
                         <button
@@ -1141,13 +1264,26 @@ export function SpeedWorkbench() {
                           ))
                         )}
                       </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                      </Popover.Content>
+                    </Popover.Portal>
+                  </div>
+                </Popover.Root>
+                {compactLayout && (
+                  <Dialog.Close asChild>
+                    <button
+                      type="button"
+                      className="drawer-close"
+                      aria-label={t("closeConnectionSettings")}
+                      title={t("closeConnectionSettings")}
+                    >
+                      <X size={16} aria-hidden="true" />
+                    </button>
+                  </Dialog.Close>
+                )}
               </div>
             </div>
 
-              <form onSubmit={submit} className="connection-form">
+              <form id={CONNECTION_FORM_ID} onSubmit={submit} className="connection-form">
                 <div className="connection-fixed-top-controls">
                   <div className="test-mode-tabs topology-tabs" aria-label={t("topology")}>
                     <button
@@ -1219,6 +1355,7 @@ export function SpeedWorkbench() {
                 <AnimatePresence initial={false}>
                   {remoteToRemote && endpointEditor === "client" && (
                     <motion.section
+                      ref={endpointEditorRef}
                       className="endpoint-card endpoint-editor-dialog editor-client"
                       role="region"
                       aria-label={t("clientConfiguration")}
@@ -1351,7 +1488,7 @@ export function SpeedWorkbench() {
                           </span>
                         </button>
                         {clientAdvancedOpen && (
-                          <div className="advanced-disclosure-fields">
+                          <div ref={clientAdvancedRef} className="advanced-disclosure-fields">
                             <label>
                               <FieldLabel icon={<Network size={13} />}>{t("clientBindIp")}</FieldLabel>
                               <input
@@ -1394,6 +1531,7 @@ export function SpeedWorkbench() {
                 <AnimatePresence initial={false}>
                 {(!remoteToRemote || endpointEditor === "server") && (
                 <motion.section
+                  ref={endpointEditorRef}
                   className={remoteToRemote
                     ? "endpoint-card endpoint-editor-dialog editor-server"
                     : "server-endpoint-form"}
@@ -1451,7 +1589,7 @@ export function SpeedWorkbench() {
                   {remoteToRemote ? t("deviceBAddress") : t("serverAddress")}
                 </FieldLabel>
                 <input
-                  autoFocus
+                  autoFocus={!remoteToRemote}
                   className="glass-input"
                   value={form.host}
                   disabled={busy}
@@ -1592,7 +1730,7 @@ export function SpeedWorkbench() {
                       </span>
                     </button>
                     {serverAdvancedOpen && (
-                      <div className="advanced-disclosure-fields">
+                      <div ref={serverAdvancedRef} className="advanced-disclosure-fields">
                         {!remoteToRemote && (
                           <label>
                             <FieldLabel icon={<Network size={13} />}>{t("localBindIp")}</FieldLabel>
@@ -1681,7 +1819,7 @@ export function SpeedWorkbench() {
                         </span>
                       </button>
                       {serverAdvancedOpen && (
-                        <div className="advanced-disclosure-fields">
+                        <div ref={serverAdvancedRef} className="advanced-disclosure-fields">
                           <label>
                             <FieldLabel icon={<Network size={13} />}>{t("localBindIp")}</FieldLabel>
                             <input
@@ -1841,37 +1979,39 @@ export function SpeedWorkbench() {
                   <Square size={15} fill="currentColor" aria-hidden="true" />
                 </button>
               </div>
-                </div>
-            </form>
-          </GlassPanel>
-        </aside>
+            </div>
+          </form>
+        </GlassPanel>
+        </ConnectionShell>
 
-        <div
-          className="layout-resizer"
-          role="separator"
-          tabIndex={0}
-          aria-label={t("resizePanels")}
-          aria-orientation="vertical"
-          aria-valuemin={Math.round(MIN_LAYOUT_SPLIT * 100)}
-          aria-valuemax={Math.round(MAX_LAYOUT_SPLIT * 100)}
-          aria-valuenow={Math.round(layoutSplit * 100)}
-          title={t("resizePanelsHelp")}
-          onDoubleClick={() => setLayoutSplit(DEFAULT_LAYOUT_SPLIT)}
-          onPointerDown={startLayoutResize}
-          onPointerMove={moveLayoutResize}
-          onPointerUp={stopLayoutResize}
-          onPointerCancel={stopLayoutResize}
-          onKeyDown={(event) => {
-            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-            event.preventDefault();
-            const direction = event.key === "ArrowLeft" ? -1 : 1;
-            setLayoutSplit((current) =>
-              Math.min(MAX_LAYOUT_SPLIT, Math.max(MIN_LAYOUT_SPLIT, current + direction * 0.02))
-            );
-          }}
-        >
-          <GripVertical size={15} aria-hidden="true" />
-        </div>
+        {!compactLayout && (
+          <div
+            className="layout-resizer"
+            role="separator"
+            tabIndex={0}
+            aria-label={t("resizePanels")}
+            aria-orientation="vertical"
+            aria-valuemin={Math.round(MIN_LAYOUT_SPLIT * 100)}
+            aria-valuemax={Math.round(MAX_LAYOUT_SPLIT * 100)}
+            aria-valuenow={Math.round(layoutSplit * 100)}
+            title={t("resizePanelsHelp")}
+            onDoubleClick={() => setLayoutSplit(DEFAULT_LAYOUT_SPLIT)}
+            onPointerDown={startLayoutResize}
+            onPointerMove={moveLayoutResize}
+            onPointerUp={stopLayoutResize}
+            onPointerCancel={stopLayoutResize}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              const direction = event.key === "ArrowLeft" ? -1 : 1;
+              setLayoutSplit((current) =>
+                Math.min(MAX_LAYOUT_SPLIT, Math.max(MIN_LAYOUT_SPLIT, current + direction * 0.02))
+              );
+            }}
+          >
+            <GripVertical size={15} aria-hidden="true" />
+          </div>
+        )}
 
         <section className="speed-column">
           <GlassPanel
@@ -1915,7 +2055,7 @@ export function SpeedWorkbench() {
 
             <div className="network-stage">
               <MacGlyph
-                active={busy}
+                active={running || status.phase === "stopping"}
                 label={remoteToRemote ? clientForm.host.trim() || t("deviceA") : t("thisMac")}
                 subtitle={remoteToRemote ? t("remoteClient") : t("localClient")}
               />
@@ -2055,24 +2195,11 @@ export function SpeedWorkbench() {
         </section>
       </main>
 
-      <AnimatePresence>
+      <AlertDialog.Root open={prompt != null}>
         {prompt && (
-          <motion.div
-            className="confirm-backdrop"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <motion.div
-              className={`confirm-dialog prompt-${prompt.kind}`}
-              role="alertdialog"
-              aria-modal="true"
-              aria-labelledby="confirm-title"
-              initial={{ opacity: 0, y: 16, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 12, scale: 0.98 }}
-              transition={{ type: "spring", stiffness: 300, damping: 28 }}
-            >
+          <AlertDialog.Portal>
+            <AlertDialog.Overlay className="confirm-backdrop" />
+            <AlertDialog.Content className={`confirm-dialog prompt-${prompt.kind}`}>
               <div className="confirm-icon">
                 {prompt.kind === "hostKeyMismatch" || prompt.kind === "clientHostKeyMismatch" ? (
                   <ShieldAlert size={21} />
@@ -2084,16 +2211,20 @@ export function SpeedWorkbench() {
                   <Server size={21} />
                 )}
               </div>
-              <h3 id="confirm-title">{prompt.title}</h3>
-              <p>{prompt.message}</p>
+              <AlertDialog.Title asChild>
+                <h3>{prompt.title}</h3>
+              </AlertDialog.Title>
+              <AlertDialog.Description>{prompt.message}</AlertDialog.Description>
               {prompt.detail && <code>{prompt.detail}</code>}
               <div className="confirm-actions">
                 {prompt.kind !== "serverUnavailable" && (
-                  <button type="button" onClick={rejectPrompt}>
-                    {prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing"
-                      ? t("later")
-                      : t("cancel")}
-                  </button>
+                  <AlertDialog.Cancel asChild>
+                    <button type="button" onClick={rejectPrompt}>
+                      {prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing"
+                        ? t("later")
+                        : t("cancel")}
+                    </button>
+                  </AlertDialog.Cancel>
                 )}
                 {(prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing") && prompt.detail && (
                   <button type="button" onClick={copyPromptDetail}>
@@ -2102,23 +2233,27 @@ export function SpeedWorkbench() {
                   </button>
                 )}
                 {prompt.kind === "serverUnavailable" ? (
-                  <button type="button" className="confirm-primary" onClick={rejectPrompt} autoFocus>
-                    {t("close")}
-                  </button>
+                  <AlertDialog.Cancel asChild>
+                    <button type="button" className="confirm-primary" onClick={rejectPrompt} autoFocus>
+                      {t("close")}
+                    </button>
+                  </AlertDialog.Cancel>
                 ) : (
-                  <button type="button" className="confirm-primary" onClick={confirmPrompt} autoFocus>
-                    {prompt.kind === "hostKeyMismatch" || prompt.kind === "clientHostKeyMismatch"
-                      ? t("trustContinue")
-                      : prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing"
-                        ? t("installedRetry")
-                        : t("reuseContinue")}
-                  </button>
+                  <AlertDialog.Action asChild>
+                    <button type="button" className="confirm-primary" onClick={confirmPrompt} autoFocus>
+                      {prompt.kind === "hostKeyMismatch" || prompt.kind === "clientHostKeyMismatch"
+                        ? t("trustContinue")
+                        : prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing"
+                          ? t("installedRetry")
+                          : t("reuseContinue")}
+                    </button>
+                  </AlertDialog.Action>
                 )}
               </div>
-            </motion.div>
-          </motion.div>
+            </AlertDialog.Content>
+          </AlertDialog.Portal>
         )}
-      </AnimatePresence>
+      </AlertDialog.Root>
     </div>
   );
 }

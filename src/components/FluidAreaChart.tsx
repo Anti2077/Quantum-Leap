@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useId, useMemo, useRef, useState, type PointerEvent } from "react";
+import { useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { formatBandwidth, formatLatency, type BandwidthUnit } from "../lib/format";
+import { clampChartTooltipPercent } from "../lib/chart";
 import { useI18n } from "../lib/i18n";
 import type { TransferDirection } from "../lib/types";
 
@@ -59,8 +60,8 @@ export function FluidAreaChart({
   const container = useRef<HTMLDivElement>(null);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const upload = direction === "upload";
-  const accent = upload ? "var(--chart-upload, #62e6d1)" : "var(--chart-download, #ff8066)";
-  const accentEnd = upload ? "var(--chart-upload-end, #81aef7)" : "var(--chart-download-end, #f6b84a)";
+  const accent = upload ? "var(--chart-upload, #ff8066)" : "var(--chart-download, #69bfff)";
+  const accentEnd = upload ? "var(--chart-upload-end, #ffc0ad)" : "var(--chart-download-end, #a3d7ff)";
 
   const points = useMemo<PlotPoint[]>(() => {
     const visible = data.slice(-60);
@@ -96,12 +97,29 @@ export function FluidAreaChart({
     setHoveredIndex(Math.round(ratio * (points.length - 1)));
   };
 
+  const moveKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (points.length === 0) return;
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    setHoveredIndex((current) => {
+      if (event.key === "Home") return 0;
+      if (event.key === "End") return points.length - 1;
+      const index = current ?? points.length - 1;
+      return Math.min(points.length - 1, Math.max(0, index + (event.key === "ArrowLeft" ? -1 : 1)));
+    });
+  };
+
   return (
     <div
       ref={container}
       className="fluid-chart"
+      tabIndex={points.length > 0 ? 0 : -1}
+      aria-label={upload ? t("uploadSpeed") : t("downloadSpeed")}
       onPointerMove={movePointer}
       onPointerLeave={() => setHoveredIndex(null)}
+      onFocus={() => points.length > 0 && setHoveredIndex(points.length - 1)}
+      onBlur={() => setHoveredIndex(null)}
+      onKeyDown={moveKeyboard}
     >
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
         <defs>
@@ -175,7 +193,7 @@ export function FluidAreaChart({
         {hoveredIndex != null && activePoint && (
           <motion.div
             className="chart-tooltip"
-            style={{ left: `${(activePoint.x / width) * 100}%` }}
+            style={{ left: `${clampChartTooltipPercent((activePoint.x / width) * 100)}%` }}
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 4 }}

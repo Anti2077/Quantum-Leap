@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useId, useMemo, useRef, useState, type PointerEvent } from "react";
+import { useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { formatBandwidth, type BandwidthUnit } from "../lib/format";
+import { clampChartTooltipPercent } from "../lib/chart";
 import { useI18n } from "../lib/i18n";
 
 interface ChartPoint {
@@ -88,12 +89,29 @@ export function ComparisonChart({
     setHoverRatio(Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)));
   };
 
+  const moveKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
+    const pointCount = Math.max(uploadPoints.length, downloadPoints.length);
+    if (pointCount === 0 || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    setHoverRatio((current) => {
+      if (event.key === "Home") return 0;
+      if (event.key === "End") return 1;
+      const step = 1 / Math.max(1, pointCount - 1);
+      return Math.min(1, Math.max(0, (current ?? 1) + (event.key === "ArrowLeft" ? -step : step)));
+    });
+  };
+
   return (
     <div
       ref={container}
       className="comparison-chart"
+      tabIndex={uploadPoints.length > 0 || downloadPoints.length > 0 ? 0 : -1}
+      aria-label={t("combinedResults")}
       onPointerMove={movePointer}
       onPointerLeave={() => setHoverRatio(null)}
+      onFocus={() => setHoverRatio(1)}
+      onBlur={() => setHoverRatio(null)}
+      onKeyDown={moveKeyboard}
     >
       <div className="comparison-legend">
         <span className="upload"><i />{t("upload")}</span>
@@ -111,7 +129,7 @@ export function ComparisonChart({
           x2={width}
           y1={uploadAverageY}
           y2={uploadAverageY}
-          stroke="var(--chart-upload, #62e6d1)"
+          stroke="var(--chart-upload, #ff8066)"
           strokeOpacity="0.42"
           strokeDasharray="9 9"
           initial={{ pathLength: 0 }}
@@ -122,7 +140,7 @@ export function ComparisonChart({
           x2={width}
           y1={downloadAverageY}
           y2={downloadAverageY}
-          stroke="var(--chart-download, #ff8066)"
+          stroke="var(--chart-download, #69bfff)"
           strokeOpacity="0.42"
           strokeDasharray="9 9"
           initial={{ pathLength: 0 }}
@@ -131,7 +149,7 @@ export function ComparisonChart({
         <motion.path
           d={smoothPath(uploadPoints)}
           fill="none"
-          stroke="var(--chart-upload, #62e6d1)"
+          stroke="var(--chart-upload, #ff8066)"
           strokeWidth="3"
           strokeLinecap="round"
           initial={{ pathLength: 0, opacity: 0 }}
@@ -141,7 +159,7 @@ export function ComparisonChart({
         <motion.path
           d={smoothPath(downloadPoints)}
           fill="none"
-          stroke="var(--chart-download, #ff8066)"
+          stroke="var(--chart-download, #69bfff)"
           strokeWidth="3"
           strokeLinecap="round"
           initial={{ pathLength: 0, opacity: 0 }}
@@ -149,8 +167,8 @@ export function ComparisonChart({
           transition={{ duration: 0.9, delay: 0.12, ease: "easeOut" }}
         />
         {[
-          { point: uploadMaximum, color: "var(--chart-upload, #62e6d1)" },
-          { point: downloadMaximum, color: "var(--chart-download, #ff8066)" }
+          { point: uploadMaximum, color: "var(--chart-upload, #ff8066)" },
+          { point: downloadMaximum, color: "var(--chart-download, #69bfff)" }
         ].map(
           ({ point, color }) => point && (
             <g key={color}>
@@ -175,14 +193,14 @@ export function ComparisonChart({
                     cx={point.x}
                     cy={point.y}
                     r="7"
-                    fill={index === 0 ? "var(--chart-upload, #62e6d1)" : "var(--chart-download, #ff8066)"}
+                    fill={index === 0 ? "var(--chart-upload, #ff8066)" : "var(--chart-download, #69bfff)"}
                     opacity="0.18"
                   />
                   <circle
                     cx={point.x}
                     cy={point.y}
                     r="3.4"
-                    fill={index === 0 ? "var(--chart-upload, #62e6d1)" : "var(--chart-download, #ff8066)"}
+                    fill={index === 0 ? "var(--chart-upload, #ff8066)" : "var(--chart-download, #69bfff)"}
                     stroke="white"
                     strokeWidth="1.2"
                   />
@@ -226,7 +244,7 @@ export function ComparisonChart({
         {hoverRatio != null && (hoveredUpload || hoveredDownload) && (
           <motion.div
             className="chart-tooltip comparison-tooltip"
-            style={{ left: `${Math.min(88, Math.max(12, hoverRatio * 100))}%` }}
+            style={{ left: `${clampChartTooltipPercent(hoverRatio * 100)}%` }}
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 4 }}

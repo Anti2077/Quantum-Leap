@@ -1,4 +1,5 @@
 import { memo, useLayoutEffect, useRef } from "react";
+import { shouldScheduleParticleFrame } from "../lib/motion";
 import type { TransferDirection } from "../lib/types";
 
 type ParticleMode = "field" | "fan" | "link";
@@ -6,9 +7,17 @@ type BorderMode = "border" | "link" | "idle";
 type FanDestination = "field" | "border";
 
 const BORDER_DIFFUSION_RATIO = 0.1;
-const TRAIL_CAPACITY = 22;
+const TRAIL_CAPACITY = 16;
 const IDLE_FRAME_INTERVAL_MS = 1000 / 30;
-const REDUCED_MOTION_FRAME_INTERVAL_MS = 1000 / 12;
+
+function readCanvasPalette() {
+  const styles = getComputedStyle(document.documentElement);
+  return {
+    upload: styles.getPropertyValue("--canvas-upload").trim() || "255, 138, 114",
+    download: styles.getPropertyValue("--canvas-download").trim() || "105, 191, 255",
+    idle: styles.getPropertyValue("--canvas-idle").trim() || "125, 151, 177"
+  };
+}
 
 interface Particle {
   mode: ParticleMode;
@@ -238,8 +247,13 @@ function ParticleCanvasComponent({
   className?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wakeFrameRef = useRef<() => void>(() => undefined);
   const animationState = useRef({ active, direction, intensity });
   animationState.current = { active, direction, intensity };
+
+  useLayoutEffect(() => {
+    wakeFrameRef.current();
+  }, [active, direction, intensity]);
 
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
@@ -249,7 +263,7 @@ function ParticleCanvasComponent({
     if (!context) return;
 
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const lightTheme = document.documentElement.dataset.colorTheme !== "dark";
+    let palette = readCanvasPalette();
     let width = 0;
     let height = 0;
     let remoteRect: Rect = { left: 1, top: 1, width: 1, height: 1 };
@@ -570,7 +584,7 @@ function ParticleCanvasComponent({
         : { left: width * 0.52, top: height * 0.05, width: width * 0.46, height: height * 0.9 };
       portalY = remoteRect.top + remoteRect.height * 0.44;
 
-      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
       canvas.width = Math.round(width * ratio);
       canvas.height = Math.round(height * ratio);
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -601,9 +615,9 @@ function ParticleCanvasComponent({
         });
       }
 
-      const particleCount = Math.max(112, Math.min(168, Math.round((remoteRect.width * remoteRect.height) / 2050)));
+      const particleCount = Math.max(72, Math.min(120, Math.round((remoteRect.width * remoteRect.height) / 2500)));
       const roundedPerimeter = Math.max(1, (remoteRect.width - 6) * 2 + (remoteRect.height - 6) * 2);
-      const borderCount = Math.max(38, Math.min(58, Math.round(roundedPerimeter / 30)));
+      const borderCount = Math.max(26, Math.min(42, Math.round(roundedPerimeter / 38)));
       while (particles.length < particleCount) particles.push(createParticle());
       if (particles.length > particleCount) particles.length = particleCount;
       while (borderParticles.length < borderCount) borderParticles.push(createBorderParticle());
@@ -647,7 +661,7 @@ function ParticleCanvasComponent({
       }
     };
 
-    const drawTrail = (trail: Trail, size: number, alpha: number) => {
+    const drawTrail = (trail: Trail, size: number, alpha: number, energized: boolean) => {
       if (trail.length < 3) return;
       let bufferIndex = trail.start;
       let coordinateIndex = bufferIndex * 2;
@@ -665,9 +679,10 @@ function ParticleCanvasComponent({
         );
       }
       context.lineWidth = Math.max(1.6, size * 2.3);
-      context.strokeStyle = lightTheme
-        ? `rgba(39, 119, 186, ${alpha * 0.3})`
-        : `rgba(181, 220, 247, ${alpha * 0.34})`;
+      const color = energized
+        ? animationState.current.direction === "upload" ? palette.upload : palette.download
+        : palette.idle;
+      context.strokeStyle = `rgba(${color}, ${alpha * 0.34})`;
       context.stroke();
 
       const coreStart = Math.floor(trail.length * 0.46);
@@ -687,9 +702,7 @@ function ParticleCanvasComponent({
         );
       }
       context.lineWidth = Math.max(1.05, size * 1.38);
-      context.strokeStyle = lightTheme
-        ? `rgba(75, 151, 211, ${alpha * 0.72})`
-        : `rgba(235, 247, 255, ${alpha * 0.92})`;
+      context.strokeStyle = `rgba(${color}, ${alpha * 0.88})`;
       context.stroke();
     };
 
@@ -697,16 +710,16 @@ function ParticleCanvasComponent({
       if (energized) {
         context.beginPath();
         context.arc(x, y, size * 3.8, 0, Math.PI * 2);
-        context.fillStyle = lightTheme
-          ? `rgba(45, 134, 205, ${alpha * 0.18})`
-          : `rgba(172, 220, 255, ${alpha * 0.26})`;
+        const color = animationState.current.direction === "upload" ? palette.upload : palette.download;
+        context.fillStyle = `rgba(${color}, ${alpha * 0.24})`;
         context.fill();
       }
       context.beginPath();
       context.arc(x, y, energized ? size * 1.24 : size * 0.84, 0, Math.PI * 2);
-      context.fillStyle = lightTheme
-        ? `rgba(54, 132, 194, ${energized ? alpha * 0.88 : alpha * 0.58})`
-        : `rgba(238, 248, 255, ${energized ? alpha : alpha * 0.68})`;
+      const color = energized
+        ? animationState.current.direction === "upload" ? palette.upload : palette.download
+        : palette.idle;
+      context.fillStyle = `rgba(${color}, ${energized ? alpha : alpha * 0.58})`;
       context.fill();
     };
 
@@ -720,7 +733,7 @@ function ParticleCanvasComponent({
       const targetActive = animationState.current.active;
       // Keep tests fluid while lowering redraw cost for idle and reduced-motion states.
       const minimumFrameInterval = reduceMotion
-        ? REDUCED_MOTION_FRAME_INTERVAL_MS
+        ? 0
         : targetActive || activeMix > 0.08
           ? 0
           : IDLE_FRAME_INTERVAL_MS;
@@ -734,9 +747,9 @@ function ParticleCanvasComponent({
       const targetActiveMix = targetActive ? 1 : 0;
       const targetFlow = animationState.current.direction === "upload" ? 1 : -1;
       const targetSpeed = Math.min(1, Math.max(0, animationState.current.intensity));
-      activeMix = approach(activeMix, targetActiveMix, targetActive ? 3.8 : 0.9, delta);
-      flow = approach(flow, targetFlow, 2.25, delta);
-      speedMix = approach(speedMix, targetSpeed, 2.4, delta);
+      activeMix = reduceMotion ? targetActiveMix : approach(activeMix, targetActiveMix, targetActive ? 3.8 : 0.9, delta);
+      flow = reduceMotion ? targetFlow : approach(flow, targetFlow, 2.25, delta);
+      speedMix = reduceMotion ? targetSpeed : approach(speedMix, targetSpeed, 2.4, delta);
       releaseUploadParticles(delta);
       const energized = activeMix > 0.035;
       if (!reduceMotion && energized && !wasEnergized) {
@@ -878,8 +891,8 @@ function ParticleCanvasComponent({
         const alpha = particle.alpha * shimmer * visibility;
         const fanTrail = particle.mode === "fan";
         if (!reduceMotion && energized) {
-          updateTrail(particle.trail, drawX, drawY, fanTrail ? 22 : 16);
-          drawTrail(particle.trail, particle.size, fanTrail ? alpha * 0.72 : alpha);
+          updateTrail(particle.trail, drawX, drawY, fanTrail ? 16 : 12);
+          drawTrail(particle.trail, particle.size, fanTrail ? alpha * 0.72 : alpha, energized);
         }
         drawHead(drawX, drawY, particle.size, alpha, energized);
       });
@@ -972,33 +985,57 @@ function ParticleCanvasComponent({
         const alpha = particle.alpha * shimmer * visibility;
         if (!reduceMotion && energized) {
           updateTrail(particle.trail, drawX, drawY);
-          drawTrail(particle.trail, particle.size, alpha);
+          drawTrail(particle.trail, particle.size, alpha, energized);
         }
         drawHead(drawX, drawY, particle.size, alpha, energized);
       });
 
       context.globalCompositeOperation = "source-over";
+      frame = shouldScheduleParticleFrame({
+        active: targetActive,
+        activeMix,
+        reducedMotion: reduceMotion,
+        pageVisible
+      })
+        ? requestAnimationFrame(tick)
+        : 0;
+    };
+
+    const wakeFrame = () => {
+      if (!pageVisible || frame !== 0) return;
+      previousTime = performance.now();
       frame = requestAnimationFrame(tick);
     };
+    wakeFrameRef.current = wakeFrame;
 
     const handleVisibilityChange = () => {
       pageVisible = !document.hidden;
-      if (pageVisible && frame === 0) {
-        previousTime = performance.now();
-        frame = requestAnimationFrame(tick);
-      }
+      if (pageVisible) wakeFrame();
     };
 
-    const observer = new ResizeObserver(rebuild);
+    const observer = new ResizeObserver(() => {
+      rebuild();
+      wakeFrame();
+    });
+    const themeObserver = new MutationObserver(() => {
+      palette = readCanvasPalette();
+      wakeFrame();
+    });
     document.addEventListener("visibilitychange", handleVisibilityChange);
     observer.observe(host);
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-color-theme"]
+    });
     rebuild();
     tick(performance.now());
 
     return () => {
       observer.disconnect();
+      themeObserver.disconnect();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       cancelAnimationFrame(frame);
+      wakeFrameRef.current = () => undefined;
     };
   }, []);
 

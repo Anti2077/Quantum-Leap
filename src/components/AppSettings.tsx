@@ -1,6 +1,7 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AnimatePresence, motion } from "framer-motion";
+import * as Dialog from "@radix-ui/react-dialog";
+import * as Popover from "@radix-ui/react-popover";
 import Activity from "lucide-react/dist/esm/icons/activity.js";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
 import ExternalLink from "lucide-react/dist/esm/icons/external-link.js";
@@ -39,28 +40,9 @@ export function AppSettings({
     const mode = getThemeMode();
     return { mode, resolved: resolveTheme(mode) };
   });
-  const controlRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => subscribeTheme((mode, resolved) => updateTheme({ mode, resolved })), []);
-
-  useEffect(() => {
-    if (!open && !aboutOpen) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      if (open && !controlRef.current?.contains(event.target as Node)) onOpenChange(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (aboutOpen) setAboutOpen(false);
-      else if (open) onOpenChange(false);
-    };
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [aboutOpen, onOpenChange, open]);
 
   useEffect(() => {
     if (!aboutOpen) return;
@@ -93,32 +75,29 @@ export function AppSettings({
 
   return (
     <>
-      <div className="app-settings-control" ref={controlRef}>
-        <button
-          ref={triggerRef}
-          type="button"
-          className={`brand-mark settings-trigger ${open ? "is-open" : ""}`}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          aria-label={t("settings")}
-          onClick={() => onOpenChange(!open)}
-        >
-          <Activity size={15} aria-hidden="true" />
-          <span>Quantum Leap</span>
-          {language === "zh-CN" && <small>跃迁</small>}
-          <ChevronDown className="settings-chevron" size={13} aria-hidden="true" />
-        </button>
-
-        <AnimatePresence>
-          {open && (
-            <motion.div
-              className="settings-popover"
-              role="dialog"
+      <Popover.Root open={open} onOpenChange={onOpenChange}>
+        <div className="app-settings-control">
+          <Popover.Trigger asChild>
+            <button
+              ref={triggerRef}
+              type="button"
+              className={`brand-mark settings-trigger ${open ? "is-open" : ""}`}
               aria-label={t("settings")}
-              initial={{ opacity: 0, y: -6, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -5, scale: 0.98 }}
-              transition={{ duration: 0.16 }}
+            >
+              <Activity size={15} aria-hidden="true" />
+              <span>Quantum Leap</span>
+              {language === "zh-CN" && <small>跃迁</small>}
+              <ChevronDown className="settings-chevron" size={13} aria-hidden="true" />
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content
+              className="settings-popover"
+              side="bottom"
+              align="start"
+              sideOffset={6}
+              collisionPadding={12}
+              aria-label={t("settings")}
             >
               <div className="settings-heading">{t("settings")}</div>
               <div className="settings-section-label">{t("appearance")}</div>
@@ -163,44 +142,29 @@ export function AppSettings({
                 <span>{t("about")}</span>
                 <ChevronDown size={13} aria-hidden="true" />
               </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+            </Popover.Content>
+          </Popover.Portal>
+        </div>
+      </Popover.Root>
 
-      <AnimatePresence>
-        {aboutOpen && (
-          <motion.div
-            className="confirm-backdrop about-backdrop"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget) setAboutOpen(false);
-            }}
-          >
-            <motion.div
+      <Dialog.Root open={aboutOpen} onOpenChange={setAboutOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="confirm-backdrop about-backdrop" />
+          <Dialog.Content
               className="about-dialog"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="about-title"
-              initial={{ opacity: 0, y: 14, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 10, scale: 0.98 }}
-              transition={{ type: "spring", stiffness: 320, damping: 28 }}
+              aria-describedby={undefined}
+              onCloseAutoFocus={(event) => {
+                event.preventDefault();
+                triggerRef.current?.focus();
+              }}
             >
-              <button
-                type="button"
-                className="about-close"
-                onClick={() => setAboutOpen(false)}
-                aria-label={t("close")}
-                title={t("close")}
-                autoFocus
-              >
-                <X size={15} />
-              </button>
+              <Dialog.Close asChild>
+                <button type="button" className="about-close" aria-label={t("close")} title={t("close")}>
+                  <X size={15} />
+                </button>
+              </Dialog.Close>
               <img src={appIcon} alt="" className="about-icon" />
-              <h2 id="about-title">Quantum Leap</h2>
+              <Dialog.Title asChild><h2>Quantum Leap</h2></Dialog.Title>
               {language === "zh-CN" && <span className="about-subtitle">跃迁</span>}
               <p className="about-version">{t("version", { version })}</p>
               <p className="about-copyright">Copyright © 2026 Anti2077</p>
@@ -209,10 +173,9 @@ export function AppSettings({
                 {t("projectHomepage")}
                 <ExternalLink size={13} aria-hidden="true" />
               </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </>
   );
 }

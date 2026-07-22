@@ -15,7 +15,7 @@
         "title": "Quantum Leap",
         "width": 1280,
         "height": 825,
-        "minWidth": 980,
+        "minWidth": 760,
         "minHeight": 700,
         "resizable": true,
         "transparent": false,

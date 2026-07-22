@@ -28,7 +28,9 @@ export function applyTheme(mode: ThemeMode) {
 
 export function subscribeTheme(listener: (mode: ThemeMode, resolved: ResolvedTheme) => void) {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 export function setThemeMode(mode: ThemeMode) {
