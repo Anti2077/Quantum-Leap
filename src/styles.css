@@ -1688,33 +1688,6 @@ select.glass-input {
   stroke: #edf2f2;
 }
 
-.energy-direction {
-  position: absolute;
-  top: calc(50% + 28px);
-  left: 50%;
-  display: grid;
-  width: 14px;
-  height: 14px;
-  place-items: center;
-  font-size: 11px;
-  transform: translate(-50%, -50%);
-  opacity: 0.48;
-  text-shadow: 0 0 8px currentColor;
-  transition: color 260ms ease, opacity 260ms ease;
-}
-
-.energy-direction.forward {
-  color: #aaf4e7;
-}
-
-.energy-direction.reverse {
-  color: #ffc0b2;
-}
-
-.energy-link.is-active .energy-direction {
-  opacity: 0.9;
-}
-
 .data-stream-field {
   position: absolute;
   inset: 0;

@@ -18,7 +18,6 @@ function EnergyLinkComponent({
   engaged,
   intensity = 0.5
 }: EnergyLinkProps) {
-  const forward = direction === "upload";
   const reduceMotion = useReducedMotion();
   const id = useId().replace(/:/g, "");
   const plugGlowId = `plug-glow-${id}`;
@@ -77,9 +76,6 @@ function EnergyLinkComponent({
         ) : null}
       </svg>
 
-      <span className={`energy-direction ${forward ? "forward" : "reverse"}`}>
-        {forward ? "↑" : "↓"}
-      </span>
     </div>
   );
 }

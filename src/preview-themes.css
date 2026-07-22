@@ -180,11 +180,6 @@ html[data-preview-theme][data-color-theme="dark"] .energy-link.is-active .energy
   filter: drop-shadow(0 0 calc(2px + var(--energy-level) * 2px) rgba(73, 155, 236, 0.52));
 }
 
-html[data-preview-theme][data-color-theme="dark"] .energy-direction.forward,
-html[data-preview-theme][data-color-theme="dark"] .energy-direction.reverse {
-  color: #82cfff;
-}
-
 html[data-preview-theme][data-color-theme="dark"] .test-progress > span,
 html[data-preview-theme][data-color-theme="dark"] .direction-download .test-progress > span {
   background: var(--preview-accent-strong);
