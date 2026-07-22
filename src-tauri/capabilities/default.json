@@ -12,6 +12,9 @@
       "allow": [
         {
           "url": "https://github.com/Anti2077/Quantum-Leap"
+        },
+        {
+          "url": "https://github.com/Anti2077/Quantum-Leap/releases/latest"
         }
       ]
     }

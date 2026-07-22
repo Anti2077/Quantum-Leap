@@ -92,7 +92,9 @@ select:focus-visible,
 .system-theme-control input:focus-visible + .compact-switch,
 .manual-theme-switch:focus-visible,
 .language-row select:focus-visible,
-.about-menu-item:focus-visible {
+.about-menu-item:focus-visible,
+.about-close:focus-visible,
+.project-link:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
@@ -259,6 +261,7 @@ h2,
 .about-version,
 .about-copyright,
 .about-subtitle,
+.update-release,
 .about-menu-item,
 .confirm-dialog > p {
   color: var(--color-text-secondary);
