@@ -30,6 +30,13 @@
     </filter>
   </defs>
 
+  <!--
+    The original background occupied roughly 91% of the canvas and read larger
+    than neighbouring macOS Dock/Finder icons. Scaling the complete mark to 86%
+    brings it to roughly 78%, leaving an 11% optical safety area while preserving
+    its proportions at every generated resolution.
+  -->
+  <g transform="translate(71.68 71.68) scale(0.86)">
   <rect x="48" y="48" width="928" height="928" rx="224" fill="url(#bg)"/>
   <path d="M174 157C332 69 677 84 858 238" fill="none" stroke="#FFFFFF" stroke-opacity="0.9" stroke-width="26" stroke-linecap="round"/>
   <path d="M142 773C346 899 698 906 884 746" fill="none" stroke="#BED9EA" stroke-opacity="0.34" stroke-width="18" stroke-linecap="round"/>
@@ -65,4 +72,5 @@
     <circle cx="617" cy="484" r="10" stroke-width="4"/>
   </g>
   <path d="M465 504L480 518M534 523L552 513M591 493L609 486" fill="none" stroke="#E8FAFF" stroke-width="8" stroke-linecap="round" opacity="0.92"/>
+  </g>
 </svg>
