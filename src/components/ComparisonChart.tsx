@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useId, useMemo, useRef, useState, type PointerEvent } from "react";
 import { formatBandwidth, type BandwidthUnit } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 
 interface ChartPoint {
   t: number;
@@ -58,6 +59,7 @@ export function ComparisonChart({
   download: ChartPoint[];
   unit: BandwidthUnit;
 }) {
+  const { t } = useI18n();
   const id = useId().replace(/:/g, "");
   const container = useRef<HTMLDivElement>(null);
   const [hoverRatio, setHoverRatio] = useState<number | null>(null);
@@ -94,8 +96,8 @@ export function ComparisonChart({
       onPointerLeave={() => setHoverRatio(null)}
     >
       <div className="comparison-legend">
-        <span className="upload"><i />上传</span>
-        <span className="download"><i />下载</span>
+        <span className="upload"><i />{t("upload")}</span>
+        <span className="download"><i />{t("download")}</span>
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
         <defs>
@@ -231,12 +233,12 @@ export function ComparisonChart({
           >
             {hoveredUpload && (
               <strong className="comparison-tooltip-upload">
-                上传 {formatBandwidth(hoveredUpload.bps, unit)}
+                {t("chartUpload", { value: formatBandwidth(hoveredUpload.bps, unit) })}
               </strong>
             )}
             {hoveredDownload && (
               <strong className="comparison-tooltip-download">
-                下载 {formatBandwidth(hoveredDownload.bps, unit)}
+                {t("chartDownload", { value: formatBandwidth(hoveredDownload.bps, unit) })}
               </strong>
             )}
             <span>{hoveredTime.toFixed(1)}s</span>

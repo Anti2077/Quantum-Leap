@@ -1,4 +1,7 @@
-use crate::model::{validate_remote_iperf_path, ServerMode, SshAuthMethod};
+use crate::{
+    i18n::localize,
+    model::{validate_bind_ip, validate_remote_iperf_path, ServerMode, SshAuthMethod, UiLanguage},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -46,6 +49,8 @@ pub struct SaveServerRequest {
     pub iperf_port: u16,
     #[serde(default)]
     pub remote_iperf_path: String,
+    #[serde(default)]
+    pub bind_ip: String,
     pub server_mode: ServerMode,
     pub username: String,
     pub password: String,
@@ -70,6 +75,8 @@ struct SavedServerMetadata {
     iperf_port: u16,
     #[serde(default)]
     remote_iperf_path: String,
+    #[serde(default)]
+    bind_ip: String,
     #[serde(default = "default_server_mode")]
     server_mode: ServerMode,
     username: String,
@@ -96,6 +103,7 @@ pub struct SavedServer {
     ssh_port: u16,
     iperf_port: u16,
     remote_iperf_path: String,
+    bind_ip: String,
     server_mode: ServerMode,
     username: String,
     password: String,
@@ -233,6 +241,7 @@ fn list_inner(app: &AppHandle) -> Result<Vec<SavedServer>, String> {
                 ssh_port: record.ssh_port,
                 iperf_port: record.iperf_port,
                 remote_iperf_path: record.remote_iperf_path,
+                bind_ip: record.bind_ip,
                 server_mode: record.server_mode,
                 username: record.username,
                 // Passwords are unlocked lazily so launching the app never causes
@@ -274,6 +283,7 @@ fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer
     }
     if request.server_mode == ServerMode::SshManaged {
         validate_remote_iperf_path(&request.remote_iperf_path)?;
+        validate_bind_ip(&request.bind_ip, "绑定 IP")?;
     }
     if request.server_mode == ServerMode::SshManaged
         && request.auth_method == SshAuthMethod::Password
@@ -317,6 +327,11 @@ fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer
         ssh_port: request.ssh_port,
         iperf_port: request.iperf_port,
         remote_iperf_path: request.remote_iperf_path.trim().to_owned(),
+        bind_ip: if request.server_mode == ServerMode::SshManaged {
+            request.bind_ip.trim().to_owned()
+        } else {
+            String::new()
+        },
         server_mode: request.server_mode,
         username: username.clone(),
         auth_method: request.auth_method,
@@ -342,6 +357,11 @@ fn save_inner(app: &AppHandle, request: SaveServerRequest) -> Result<SavedServer
         ssh_port: request.ssh_port,
         iperf_port: request.iperf_port,
         remote_iperf_path: request.remote_iperf_path.trim().to_owned(),
+        bind_ip: if request.server_mode == ServerMode::SshManaged {
+            request.bind_ip.trim().to_owned()
+        } else {
+            String::new()
+        },
         server_mode: request.server_mode,
         username,
         password: request.password,
@@ -363,40 +383,50 @@ fn delete_inner(app: &AppHandle, request: DeleteServerRequest) -> Result<(), Str
 }
 
 #[tauri::command]
-pub async fn list_saved_servers(app: AppHandle) -> Result<Vec<SavedServer>, String> {
+pub async fn list_saved_servers(
+    app: AppHandle,
+    language: UiLanguage,
+) -> Result<Vec<SavedServer>, String> {
     tauri::async_runtime::spawn_blocking(move || list_inner(&app))
         .await
-        .map_err(|error| format!("读取常用服务器任务失败：{error}"))?
+        .map_err(|error| localize(language, format!("读取常用服务器任务失败：{error}")))?
+        .map_err(|error| localize(language, error))
 }
 
 #[tauri::command]
 pub async fn save_server(
     app: AppHandle,
     payload: SaveServerRequest,
+    language: UiLanguage,
 ) -> Result<SavedServer, String> {
     tauri::async_runtime::spawn_blocking(move || save_inner(&app, payload))
         .await
-        .map_err(|error| format!("保存常用服务器任务失败：{error}"))?
+        .map_err(|error| localize(language, format!("保存常用服务器任务失败：{error}")))?
+        .map_err(|error| localize(language, error))
 }
 
 #[tauri::command]
 pub async fn get_saved_server_password(
     app: AppHandle,
     payload: DeleteServerRequest,
+    language: UiLanguage,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || password_inner(&app, payload))
         .await
-        .map_err(|error| format!("读取服务器密码任务失败：{error}"))?
+        .map_err(|error| localize(language, format!("读取服务器密码任务失败：{error}")))?
+        .map_err(|error| localize(language, error))
 }
 
 #[tauri::command]
 pub async fn delete_saved_server(
     app: AppHandle,
     payload: DeleteServerRequest,
+    language: UiLanguage,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || delete_inner(&app, payload))
         .await
-        .map_err(|error| format!("删除常用服务器任务失败：{error}"))?
+        .map_err(|error| localize(language, format!("删除常用服务器任务失败：{error}")))?
+        .map_err(|error| localize(language, error))
 }
 
 #[cfg(test)]
@@ -414,6 +444,7 @@ mod tests {
             ssh_port: 22,
             iperf_port: 5201,
             remote_iperf_path: "/opt/bin/iperf3".into(),
+            bind_ip: "192.168.10.8".into(),
             server_mode: ServerMode::SshManaged,
             username: "tester".into(),
             auth_method: SshAuthMethod::Password,
@@ -427,6 +458,7 @@ mod tests {
         assert_eq!(restored, records);
         assert!(!raw.contains("\"password\":"));
         assert!(raw.contains("/opt/bin/iperf3"));
+        assert!(raw.contains("192.168.10.8"));
         let _ = fs::remove_dir_all(directory);
     }
 
@@ -437,6 +469,7 @@ mod tests {
             serde_json::from_slice(legacy).expect("read legacy metadata");
 
         assert_eq!(restored[0].note, "");
+        assert_eq!(restored[0].bind_ip, "");
     }
 
     #[test]

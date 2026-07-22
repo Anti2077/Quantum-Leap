@@ -3,6 +3,7 @@ export type ResolvedTheme = Exclude<ThemeMode, "auto">;
 
 const THEME_MODE_KEY = "quantum-leap.theme-mode";
 const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
+const listeners = new Set<(mode: ThemeMode, resolved: ResolvedTheme) => void>();
 
 export function getThemeMode(): ThemeMode {
   try {
@@ -22,6 +23,12 @@ export function applyTheme(mode: ThemeMode) {
   document.documentElement.dataset.themeMode = mode;
   document.documentElement.dataset.colorTheme = resolved;
   document.documentElement.style.colorScheme = resolved;
+  listeners.forEach((listener) => listener(mode, resolved));
+}
+
+export function subscribeTheme(listener: (mode: ThemeMode, resolved: ResolvedTheme) => void) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 }
 
 export function setThemeMode(mode: ThemeMode) {

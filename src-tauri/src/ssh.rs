@@ -323,15 +323,20 @@ fn server_start_command(remote: &RemoteTarget, one_off: bool) -> String {
     let prelude = remote_iperf_prelude(remote);
     let log_path = format!("/tmp/iperf3-ui-{}.log", remote.iperf_port);
     let one_off_flag = if one_off { "-1" } else { "" };
+    let bind_flag = if remote.bind_ip.trim().is_empty() {
+        String::new()
+    } else {
+        format!("-B {}", shell_quote(remote.bind_ip.trim()))
+    };
     let script = format!(
         "{prelude}; \
          start_iperf() {{ \
            if command -v nohup >/dev/null 2>&1; then \
-             exec nohup \"$IPERF3_BIN\" -s {one_off_flag} -p {port}; \
+             exec nohup \"$IPERF3_BIN\" -s {one_off_flag} -p {port} {bind_flag}; \
            elif command -v setsid >/dev/null 2>&1; then \
-             exec setsid \"$IPERF3_BIN\" -s {one_off_flag} -p {port}; \
+             exec setsid \"$IPERF3_BIN\" -s {one_off_flag} -p {port} {bind_flag}; \
            else \
-             trap '' HUP; exec \"$IPERF3_BIN\" -s {one_off_flag} -p {port}; \
+             trap '' HUP; exec \"$IPERF3_BIN\" -s {one_off_flag} -p {port} {bind_flag}; \
            fi; \
          }}; \
          start_iperf >{log} 2>&1 </dev/null & pid=$!; \
@@ -410,6 +415,22 @@ fn parse_server_start(
     Err(parse_remote_iperf_error(stderr, status, "远端 iperf3 启动"))
 }
 
+fn rejects_bind_option(detail: &str) -> bool {
+    let normalized = detail.to_ascii_lowercase();
+    [
+        "unrecognized option",
+        "unknown option",
+        "invalid option",
+        "illegal option",
+    ]
+    .iter()
+    .any(|message| normalized.contains(message))
+        && (normalized.contains("--bind")
+            || normalized.contains("option -- 'b'")
+            || normalized.contains("option -- b")
+            || normalized.contains("option: b"))
+}
+
 pub fn start_remote_server(
     remote: &RemoteTarget,
     reuse_existing: bool,
@@ -418,6 +439,12 @@ pub fn start_remote_server(
     let session = connect(remote)?;
     let command = server_start_command(remote, one_off);
     let (stdout, stderr, status) = run_command(&session, &command)?;
+    if !remote.bind_ip.is_empty() && rejects_bind_option(&stderr) {
+        return Err(SshError::Message(format!(
+            "服务端 iperf3 不支持绑定 IP（-B）：{}",
+            stderr.trim()
+        )));
+    }
     parse_server_start(&stdout, &stderr, status, reuse_existing)
 }
 
@@ -535,6 +562,7 @@ mod tests {
             ssh_port: 22,
             iperf_port: 5201,
             iperf_path: iperf_path.into(),
+            bind_ip: String::new(),
             username: "tester".into(),
             password: "secret".into(),
             auth_method: SshAuthMethod::Password,
@@ -627,6 +655,24 @@ mod tests {
         assert!(command.contains("command -v setsid"));
         assert!(command.contains("trap '\"'\"''\"'\"' HUP"));
         assert!(command.contains("-s -1 -p 5201"));
+    }
+
+    #[test]
+    fn server_command_binds_to_the_configured_ip() {
+        let mut target = remote("");
+        target.bind_ip = "2001:db8::20".into();
+        let command = server_start_command(&target, false);
+
+        assert!(command.contains("-p 5201 -B '\"'\"'2001:db8::20'\"'\"'"));
+    }
+
+    #[test]
+    fn recognizes_server_builds_without_bind_support() {
+        assert!(rejects_bind_option("iperf3: unrecognized option '--bind'"));
+        assert!(rejects_bind_option("iperf3: illegal option -- B"));
+        assert!(!rejects_bind_option(
+            "unable to bind to server socket: Cannot assign requested address"
+        ));
     }
 
     #[test]

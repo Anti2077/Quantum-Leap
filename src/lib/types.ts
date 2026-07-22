@@ -9,6 +9,7 @@ export interface RemoteClientRequest {
   host: string;
   sshPort: number;
   remoteIperfPath: string;
+  bindIp: string;
   username: string;
   password: string;
   authMethod: SshAuthMethod;
@@ -18,10 +19,13 @@ export interface RemoteClientRequest {
 }
 
 export interface SpeedTestRequest {
+  language: "en" | "zh-CN";
   host: string;
   sshPort: number;
   iperfPort: number;
   remoteIperfPath: string;
+  localBindIp: string;
+  serverBindIp: string;
   serverMode: ServerMode;
   username: string;
   password: string;
@@ -74,6 +78,7 @@ export interface SavedServer {
   sshPort: number;
   iperfPort: number;
   remoteIperfPath: string;
+  bindIp: string;
   serverMode: ServerMode;
   username: string;
   password: string;
@@ -88,6 +93,7 @@ export interface SaveServerRequest {
   sshPort: number;
   iperfPort: number;
   remoteIperfPath: string;
+  bindIp: string;
   serverMode: ServerMode;
   username: string;
   password: string;

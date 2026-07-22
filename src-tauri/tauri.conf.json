@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Quantum Leap (跃迁)",
+        "title": "Quantum Leap",
         "width": 1280,
         "height": 825,
         "minWidth": 980,

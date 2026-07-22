@@ -70,6 +70,30 @@ fn is_server_unavailable(detail: &str) -> bool {
     .any(|message| normalized.contains(message))
 }
 
+fn rejects_bind_option(detail: &str) -> bool {
+    let normalized = detail.to_ascii_lowercase();
+    let rejects_option = [
+        "unrecognized option",
+        "unknown option",
+        "invalid option",
+        "illegal option",
+    ]
+    .iter()
+    .any(|message| normalized.contains(message));
+    rejects_option
+        && (normalized.contains("--bind")
+            || normalized.contains("option -- 'b'")
+            || normalized.contains("option -- b")
+            || normalized.contains("option: b"))
+}
+
+fn bind_unsupported_error(endpoint: &str, detail: &str) -> RunError {
+    RunError::Message(format!(
+        "{endpoint} iperf3 不支持绑定 IP（-B）：{}",
+        detail.trim()
+    ))
+}
+
 fn should_report_server_unavailable(request: &SpeedTestRequest, detail: &str) -> bool {
     request.server_mode == ServerMode::Existing || is_server_unavailable(detail)
 }
@@ -207,8 +231,10 @@ async fn stop_ping(process: &mut Option<(Child, JoinHandle<()>)>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn client_args(
     target_host: &str,
+    bind_ip: &str,
     iperf_port: u16,
     direction: TransferDirection,
     protocol: TransportProtocol,
@@ -237,6 +263,9 @@ fn client_args(
     }
     if direction == TransferDirection::Download {
         args.push("-R".into());
+    }
+    if !bind_ip.trim().is_empty() {
+        args.extend(["-B".into(), bind_ip.trim().into()]);
     }
     args
 }
@@ -268,7 +297,8 @@ pub async fn run_local_client(
     let mut command = Command::new(binary);
     command
         .args(client_args(
-            request.host.trim(),
+            request.target_host(),
+            request.client_bind_ip(),
             request.iperf_port,
             direction,
             protocol,
@@ -293,7 +323,7 @@ pub async fn run_local_client(
         .ok_or_else(|| RunError::Message("无法读取 iperf3 错误输出".into()))?;
 
     let ping_metrics = Arc::new(Mutex::new(PingMetrics::default()));
-    let mut ping_process = spawn_ping(request.host.trim(), ping_metrics.clone());
+    let mut ping_process = spawn_ping(request.target_host(), ping_metrics.clone());
 
     let app_for_output = app.clone();
     let stdout_task = tauri::async_runtime::spawn(async move {
@@ -342,7 +372,9 @@ pub async fn run_local_client(
                 } else {
                     stderr.trim()
                 };
-                let error = if should_report_server_unavailable(request, detail) {
+                let error = if !request.client_bind_ip().is_empty() && rejects_bind_option(detail) {
+                    bind_unsupported_error("本机客户端", detail)
+                } else if should_report_server_unavailable(request, detail) {
                     RunError::ServerUnavailable
                 } else if detail.is_empty() {
                     RunError::Message(format!("iperf3 异常退出：{status}"))
@@ -370,6 +402,9 @@ pub async fn run_local_client(
         } else {
             stderr.trim()
         };
+        if !request.client_bind_ip().is_empty() && rejects_bind_option(detail) {
+            return Err(bind_unsupported_error("本机客户端", detail));
+        }
         if should_report_server_unavailable(request, detail) {
             return Err(RunError::ServerUnavailable);
         }
@@ -402,6 +437,7 @@ fn run_remote_client_blocking(
     }
     let args = client_args(
         target_host,
+        &client.bind_ip,
         iperf_port,
         direction,
         protocol,
@@ -500,6 +536,9 @@ fn run_remote_client_blocking(
                 "测速发起端 iperf3 启动",
             )));
         }
+        if !client.bind_ip.is_empty() && rejects_bind_option(detail) {
+            return Err(bind_unsupported_error("测速发起端", detail));
+        }
         if is_server_unavailable(detail) {
             return Err(RunError::ServerUnavailable);
         }
@@ -511,6 +550,9 @@ fn run_remote_client_blocking(
     }
 
     if output.sample_count == 0 {
+        if !client.bind_ip.is_empty() && rejects_bind_option(detail) {
+            return Err(bind_unsupported_error("测速发起端", detail));
+        }
         if is_server_unavailable(detail) {
             return Err(RunError::ServerUnavailable);
         }
@@ -756,10 +798,13 @@ mod tests {
 
     fn request() -> SpeedTestRequest {
         SpeedTestRequest {
+            language: crate::model::UiLanguage::En,
             host: "10.0.0.8".into(),
             ssh_port: 22,
             iperf_port: 5201,
             remote_iperf_path: String::new(),
+            local_bind_ip: String::new(),
+            server_bind_ip: String::new(),
             server_mode: ServerMode::SshManaged,
             username: "tester".into(),
             password: "secret".into(),
@@ -938,6 +983,7 @@ mod tests {
     fn builds_advanced_udp_download_arguments() {
         let args = client_args(
             "10.0.0.8",
+            "192.168.10.4",
             5201,
             TransferDirection::Download,
             TransportProtocol::Udp,
@@ -954,12 +1000,14 @@ mod tests {
         assert!(args.windows(2).any(|pair| pair == ["-b", "0"]));
         assert!(args.iter().any(|argument| argument == "-u"));
         assert!(args.iter().any(|argument| argument == "-R"));
+        assert!(args.windows(2).any(|pair| pair == ["-B", "192.168.10.4"]));
     }
 
     #[test]
     fn builds_continuous_duration_arguments() {
         let args = client_args(
             "10.0.0.8",
+            "",
             5201,
             TransferDirection::Upload,
             TransportProtocol::Tcp,
@@ -969,6 +1017,33 @@ mod tests {
         );
 
         assert!(args.windows(2).any(|pair| pair == ["-t", "0"]));
+        assert!(!args.iter().any(|argument| argument == "-B"));
+    }
+
+    #[test]
+    fn legacy_text_mode_keeps_bind_arguments() {
+        let args = client_args(
+            "2001:db8::20",
+            "2001:db8::10",
+            5201,
+            TransferDirection::Upload,
+            TransportProtocol::Tcp,
+            1,
+            10,
+            false,
+        );
+
+        assert!(!args.iter().any(|argument| argument == "--json-stream"));
+        assert!(args.windows(2).any(|pair| pair == ["-B", "2001:db8::10"]));
+    }
+
+    #[test]
+    fn recognizes_legacy_builds_without_bind_support() {
+        assert!(rejects_bind_option("iperf3: unrecognized option '--bind'"));
+        assert!(rejects_bind_option("iperf3: illegal option -- B"));
+        assert!(!rejects_bind_option(
+            "unable to bind to server socket: Cannot assign requested address"
+        ));
     }
 
     #[test]

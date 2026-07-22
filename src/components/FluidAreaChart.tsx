@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useId, useMemo, useRef, useState, type PointerEvent } from "react";
 import { formatBandwidth, formatLatency, type BandwidthUnit } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 import type { TransferDirection } from "../lib/types";
 
 interface ChartPoint {
@@ -53,6 +54,7 @@ export function FluidAreaChart({
   direction: TransferDirection;
   unit: BandwidthUnit;
 }) {
+  const { t } = useI18n();
   const id = useId().replace(/:/g, "");
   const container = useRef<HTMLDivElement>(null);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
@@ -182,7 +184,10 @@ export function FluidAreaChart({
             <span>{activePoint.t.toFixed(1)}s</span>
             {(activePoint.latencyMs != null || activePoint.jitterMs != null) && (
               <span className="chart-tooltip-quality">
-                延迟 {formatLatency(activePoint.latencyMs)} · 抖动 {formatLatency(activePoint.jitterMs)}
+                {t("latencyJitter", {
+                  latency: formatLatency(activePoint.latencyMs),
+                  jitter: formatLatency(activePoint.jitterMs)
+                })}
               </span>
             )}
           </motion.div>

@@ -1,13 +1,15 @@
+mod i18n;
 mod iperf;
 mod model;
 mod saved_server;
 mod ssh;
 
 use crate::{
+    i18n::localize,
     iperf::{run_local_client, run_remote_client, RunError},
     model::{
         RemoteTarget, ServerMode, SpeedPromptEvent, SpeedStateEvent, SpeedTestRequest, TestMode,
-        TestTopology, TransferDirection, TransportProtocol,
+        TestTopology, TransferDirection, TransportProtocol, UiLanguage,
     },
     ssh::{
         cleanup_remote_client, cleanup_remote_server, start_remote_server, RemoteServer, SshError,
@@ -26,6 +28,7 @@ use tokio::sync::watch;
 
 #[derive(Clone)]
 struct ActiveSession {
+    language: UiLanguage,
     server_remote: Option<RemoteTarget>,
     server_pid: Arc<AtomicU32>,
     client_remote: Option<RemoteTarget>,
@@ -42,12 +45,17 @@ struct AppState {
     active: Arc<Mutex<Option<ActiveSession>>>,
 }
 
-fn emit_state(app: &AppHandle, phase: &'static str, message: impl Into<String>) {
+fn emit_state(
+    app: &AppHandle,
+    language: UiLanguage,
+    phase: &'static str,
+    message: impl Into<String>,
+) {
     let _ = app.emit(
         "speed://state",
         SpeedStateEvent {
             phase,
-            message: message.into(),
+            message: localize(language, message.into()),
         },
     );
 }
@@ -60,33 +68,47 @@ fn unavailable_server_message(manages_remote: bool) -> &'static str {
     }
 }
 
-fn emit_server_unavailable_prompt(app: &AppHandle, manages_remote: bool, remote: &RemoteTarget) {
+fn emit_server_unavailable_prompt(
+    app: &AppHandle,
+    language: UiLanguage,
+    manages_remote: bool,
+    remote: &RemoteTarget,
+) {
     emit_prompt(
         app,
+        language,
         "serverUnavailable",
         "测速服务不可用",
         unavailable_server_message(manages_remote),
-        Some(format!(
-            "服务器地址：{}\n测速端口：{}",
-            remote.host, remote.iperf_port
-        )),
+        Some(if remote.bind_ip.is_empty() {
+            format!(
+                "服务器地址：{}\n测速端口：{}",
+                remote.host, remote.iperf_port
+            )
+        } else {
+            format!(
+                "SSH 地址：{}\n测速目标：{}\n测速端口：{}",
+                remote.host, remote.bind_ip, remote.iperf_port
+            )
+        }),
     );
 }
 
 fn emit_prompt(
     app: &AppHandle,
+    language: UiLanguage,
     kind: &'static str,
-    title: &'static str,
+    title: impl Into<String>,
     message: impl Into<String>,
     detail: Option<String>,
 ) {
-    emit_state(app, "confirming", "等待确认后继续");
+    emit_state(app, language, "confirming", "等待确认后继续");
     let _ = app.emit(
         "speed://prompt",
         SpeedPromptEvent {
             kind,
-            title,
-            message: message.into(),
+            title: localize(language, title.into()),
+            message: localize(language, message.into()),
             detail,
         },
     );
@@ -134,10 +156,11 @@ async fn cleanup_endpoints(
     .map_err(|error| format!("清理任务异常结束：{error}"))?
 }
 
-fn emit_client_ssh_error(app: &AppHandle, error: SshError) {
+fn emit_client_ssh_error(app: &AppHandle, language: UiLanguage, error: SshError) {
     match error {
         SshError::HostKeyMismatch(fingerprint) => emit_prompt(
             app,
+            language,
             "clientHostKeyMismatch",
             "测速发起端身份已变化",
             "测速发起端的 SSH 主机密钥与 known_hosts 不一致。确认指纹可信后才能继续。",
@@ -145,6 +168,7 @@ fn emit_client_ssh_error(app: &AppHandle, error: SshError) {
         ),
         SshError::Iperf3Missing(package_manager) => emit_prompt(
             app,
+            language,
             "clientIperf3Missing",
             "测速发起端未安装 iperf3",
             package_manager.label().map_or_else(
@@ -153,8 +177,10 @@ fn emit_client_ssh_error(app: &AppHandle, error: SshError) {
             ),
             package_manager.install_command().map(str::to_string),
         ),
-        SshError::ExistingServer => emit_state(app, "failed", "测速发起端状态异常"),
-        SshError::Message(message) => emit_state(app, "failed", format!("测速发起端：{message}")),
+        SshError::ExistingServer => emit_state(app, language, "failed", "测速发起端状态异常"),
+        SshError::Message(message) => {
+            emit_state(app, language, "failed", format!("测速发起端：{message}"))
+        }
     }
 }
 
@@ -164,22 +190,27 @@ async fn start_speed_test(
     state: State<'_, AppState>,
     payload: SpeedTestRequest,
 ) -> Result<(), String> {
-    payload.validate()?;
+    let language = payload.language;
+    payload
+        .validate()
+        .map_err(|error| localize(language, error))?;
     let manages_remote = payload.server_mode == ServerMode::SshManaged;
     let remote_to_remote = payload.test_topology == TestTopology::RemoteToRemote;
     let remote = payload.remote_target();
     let remote_client = payload.remote_client_target();
+    let target_host = payload.target_host().to_owned();
     let (cancel_tx, mut cancel_rx) = watch::channel(false);
     let remote_pid = Arc::new(AtomicU32::new(0));
     let client_pid = Arc::new(AtomicU32::new(0));
     let cancel_remote = Arc::new(AtomicBool::new(false));
     let startup_finished = Arc::new(AtomicBool::new(false));
     let session = ActiveSession {
+        language,
         server_remote: manages_remote.then(|| remote.clone()),
         server_pid: remote_pid.clone(),
         client_remote: remote_client.clone(),
         client_pid: client_pid.clone(),
-        target_host: remote.host.clone(),
+        target_host: target_host.clone(),
         iperf_port: remote.iperf_port,
         startup_finished: startup_finished.clone(),
         cancel: cancel_tx,
@@ -190,22 +221,31 @@ async fn start_speed_test(
         let mut guard = state
             .active
             .lock()
-            .map_err(|_| "测速状态不可用".to_string())?;
+            .map_err(|_| localize(language, "测速状态不可用"))?;
         if guard.is_some() {
-            return Err("已有测速任务正在运行".into());
+            return Err(localize(language, "已有测速任务正在运行"));
         }
         *guard = Some(session);
     }
 
+    let starting_message = if remote_to_remote {
+        "正在建立双端 SSH 安全通道"
+    } else if manages_remote {
+        "正在建立 SSH 安全通道"
+    } else {
+        "正在连接已有测速服务"
+    };
     emit_state(
         &app,
+        language,
         "starting",
-        if remote_to_remote {
-            "正在建立双端 SSH 安全通道"
-        } else if manages_remote {
-            "正在建立 SSH 安全通道"
+        if remote.bind_ip.is_empty() {
+            starting_message.to_owned()
         } else {
-            "正在连接已有测速服务"
+            format!(
+                "{starting_message} · SSH 地址：{} · 测速目标：{target_host}",
+                remote.host
+            )
         },
     );
     let active = state.inner().active.clone();
@@ -238,6 +278,7 @@ async fn start_speed_test(
                 match error {
                     SshError::HostKeyMismatch(fingerprint) => emit_prompt(
                         &app,
+                        language,
                         "hostKeyMismatch",
                         "服务器身份已变化",
                         "known_hosts 中的密钥与服务器当前密钥不一致。确认指纹可信后才能继续。",
@@ -245,6 +286,7 @@ async fn start_speed_test(
                     ),
                     SshError::ExistingServer => emit_prompt(
                         &app,
+                        language,
                         "existingServer",
                         "检测到已有测速服务",
                         "目标端口已有服务监听。继续将直接复用它，完成后不会终止该服务。",
@@ -252,6 +294,7 @@ async fn start_speed_test(
                     ),
                     SshError::Iperf3Missing(package_manager) => emit_prompt(
                         &app,
+                        language,
                         "iperf3Missing",
                         "远端未安装 iperf3",
                         package_manager.label().map_or_else(
@@ -267,7 +310,7 @@ async fn start_speed_test(
                         ),
                         package_manager.install_command().map(str::to_string),
                     ),
-                    SshError::Message(message) => emit_state(&app, "failed", message),
+                    SshError::Message(message) => emit_state(&app, language, "failed", message),
                 }
                 return;
             }
@@ -282,13 +325,14 @@ async fn start_speed_test(
                 pid,
                 remote_client.clone(),
                 client_pid.load(Ordering::Acquire),
-                remote.host.clone(),
+                target_host.clone(),
                 remote.iperf_port,
             )
             .await;
             match cleanup_result {
                 Ok(()) => emit_state(
                     &app,
+                    language,
                     "cancelled",
                     if managed {
                         "测速已中断，远端服务已清理"
@@ -298,6 +342,7 @@ async fn start_speed_test(
                 ),
                 Err(error) => emit_state(
                     &app,
+                    language,
                     "failed",
                     format!("测速已中断，但远端清理失败：{error}"),
                 ),
@@ -333,13 +378,19 @@ async fn start_speed_test(
             };
             emit_state(
                 &app,
+                language,
                 "running",
                 format!(
-                    "正在进行{direction_name}测试 · {protocol_name} · {streams} 并发{}",
+                    "正在进行{direction_name}测试 · {protocol_name} · {streams} 并发{}{}",
                     if matches!(server, RemoteServer::Existing) {
                         " · 复用已有服务"
                     } else {
                         ""
+                    },
+                    if remote.bind_ip.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · 测速目标：{target_host}")
                     }
                 ),
             );
@@ -348,7 +399,7 @@ async fn start_speed_test(
                 run_remote_client(
                     &app,
                     client,
-                    &remote.host,
+                    &target_host,
                     remote.iperf_port,
                     direction,
                     protocol,
@@ -381,6 +432,7 @@ async fn start_speed_test(
         }
         emit_state(
             &app,
+            language,
             "stopping",
             if managed {
                 "正在关闭远端 iperf3 服务"
@@ -394,7 +446,7 @@ async fn start_speed_test(
             pid,
             remote_client.clone(),
             client_pid.load(Ordering::Acquire),
-            remote.host.clone(),
+            target_host.clone(),
             remote.iperf_port,
         )
         .await;
@@ -402,6 +454,7 @@ async fn start_speed_test(
         match (run_result, cleanup_result) {
             (Ok(()), Ok(())) => emit_state(
                 &app,
+                language,
                 "completed",
                 if managed {
                     "测速完成，远端服务已关闭"
@@ -411,6 +464,7 @@ async fn start_speed_test(
             ),
             (Err(RunError::Cancelled), Ok(())) => emit_state(
                 &app,
+                language,
                 "cancelled",
                 if managed {
                     "测速已中断，远端服务已清理"
@@ -419,28 +473,40 @@ async fn start_speed_test(
                 },
             ),
             (Err(RunError::ServerUnavailable), Ok(())) => {
-                emit_server_unavailable_prompt(&app, manages_remote, &remote)
+                emit_server_unavailable_prompt(&app, language, manages_remote, &remote)
             }
-            (Err(RunError::Message(error)), Ok(())) => emit_state(&app, "failed", error),
-            (Err(RunError::Remote(error)), Ok(())) => emit_client_ssh_error(&app, error),
-            (Ok(()), Err(error)) => emit_state(&app, "failed", error),
+            (Err(RunError::Message(error)), Ok(())) => emit_state(&app, language, "failed", error),
+            (Err(RunError::Remote(error)), Ok(())) => emit_client_ssh_error(&app, language, error),
+            (Ok(()), Err(error)) => emit_state(&app, language, "failed", error),
             (Err(RunError::Cancelled), Err(error)) => emit_state(
                 &app,
+                language,
                 "failed",
                 format!("测速已中断，但远端清理失败：{error}"),
             ),
             (Err(RunError::Message(run_error)), Err(cleanup_error)) => emit_state(
                 &app,
+                language,
                 "failed",
                 format!("{run_error}；同时远端清理失败：{cleanup_error}"),
             ),
             (Err(RunError::Remote(error)), Err(cleanup_error)) => {
-                emit_client_ssh_error(&app, error);
-                emit_state(&app, "failed", format!("同时远端清理失败：{cleanup_error}"));
+                emit_client_ssh_error(&app, language, error);
+                emit_state(
+                    &app,
+                    language,
+                    "failed",
+                    format!("同时远端清理失败：{cleanup_error}"),
+                );
             }
             (Err(RunError::ServerUnavailable), Err(cleanup_error)) => {
-                emit_server_unavailable_prompt(&app, manages_remote, &remote);
-                emit_state(&app, "failed", format!("同时远端清理失败：{cleanup_error}"));
+                emit_server_unavailable_prompt(&app, language, manages_remote, &remote);
+                emit_state(
+                    &app,
+                    language,
+                    "failed",
+                    format!("同时远端清理失败：{cleanup_error}"),
+                );
             }
         }
 
@@ -451,17 +517,22 @@ async fn start_speed_test(
 }
 
 #[tauri::command]
-async fn stop_speed_test(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+async fn stop_speed_test(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    language: UiLanguage,
+) -> Result<(), String> {
     let session = state
         .active
         .lock()
-        .map_err(|_| "测速状态不可用".to_string())?
+        .map_err(|_| localize(language, "测速状态不可用"))?
         .clone();
 
     if let Some(session) = session {
+        let session_language = session.language;
         let _ = session.cancel.send(true);
         session.cancel_remote.store(true, Ordering::Release);
-        emit_state(&app, "stopping", "正在停止测速");
+        emit_state(&app, session_language, "stopping", "正在停止测速");
 
         // The remote client is read through a blocking SSH channel. Proactively terminate
         // managed endpoint processes so the channel reaches EOF instead of waiting for the
@@ -519,6 +590,7 @@ fn cleanup_before_exit(app: &tauri::AppHandle) {
 
 fn main() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             start_speed_test,

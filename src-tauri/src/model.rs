@@ -1,7 +1,17 @@
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 
 pub const STANDARD_DURATION_SECONDS: u16 = 10;
 pub const STANDARD_PARALLEL_STREAMS: u8 = 8;
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub enum UiLanguage {
+    #[default]
+    #[serde(rename = "en")]
+    En,
+    #[serde(rename = "zh-CN")]
+    ZhCn,
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -53,6 +63,8 @@ pub struct RemoteClientRequest {
     pub ssh_port: u16,
     #[serde(default)]
     pub remote_iperf_path: String,
+    #[serde(default)]
+    pub bind_ip: String,
     pub username: String,
     pub password: String,
     pub auth_method: SshAuthMethod,
@@ -70,6 +82,7 @@ impl RemoteClientRequest {
             return Err("测速发起端 SSH 端口必须在 1 到 65535 之间".into());
         }
         validate_remote_iperf_path(&self.remote_iperf_path)?;
+        validate_bind_ip(&self.bind_ip, "测速发起端绑定 IP")?;
         if self.username.trim().is_empty() {
             return Err("请输入测速发起端 SSH 用户名".into());
         }
@@ -91,6 +104,7 @@ impl RemoteClientRequest {
             ssh_port: self.ssh_port,
             iperf_port,
             iperf_path: self.remote_iperf_path.trim().to_owned(),
+            bind_ip: self.bind_ip.trim().to_owned(),
             username: self.username.trim().to_owned(),
             password: self.password.clone(),
             auth_method: self.auth_method,
@@ -104,11 +118,17 @@ impl RemoteClientRequest {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeedTestRequest {
+    #[serde(default)]
+    pub language: UiLanguage,
     pub host: String,
     pub ssh_port: u16,
     pub iperf_port: u16,
     #[serde(default)]
     pub remote_iperf_path: String,
+    #[serde(default)]
+    pub local_bind_ip: String,
+    #[serde(default)]
+    pub server_bind_ip: String,
     pub server_mode: ServerMode,
     pub username: String,
     pub password: String,
@@ -138,6 +158,7 @@ impl SpeedTestRequest {
         }
         if self.server_mode == ServerMode::SshManaged {
             validate_remote_iperf_path(&self.remote_iperf_path)?;
+            validate_bind_ip(&self.server_bind_ip, "服务端绑定 IP")?;
             if self.username.trim().is_empty() {
                 return Err("请输入 SSH 用户名".into());
             }
@@ -159,6 +180,8 @@ impl SpeedTestRequest {
                 .as_ref()
                 .ok_or_else(|| "请填写测速发起端 SSH 信息".to_string())?
                 .validate()?;
+        } else {
+            validate_bind_ip(&self.local_bind_ip, "本机客户端绑定 IP")?;
         }
         if self.test_mode == TestMode::Advanced
             && self.duration_seconds != 0
@@ -202,6 +225,11 @@ impl SpeedTestRequest {
             ssh_port: self.ssh_port,
             iperf_port: self.iperf_port,
             iperf_path: self.remote_iperf_path.trim().to_owned(),
+            bind_ip: if self.server_mode == ServerMode::SshManaged {
+                self.server_bind_ip.trim().to_owned()
+            } else {
+                String::new()
+            },
             username: self.username.trim().to_owned(),
             password: self.password.clone(),
             auth_method: self.auth_method,
@@ -216,6 +244,25 @@ impl SpeedTestRequest {
             .as_ref()
             .map(|client| client.remote_target(self.iperf_port))
     }
+
+    pub fn target_host(&self) -> &str {
+        if self.server_mode == ServerMode::SshManaged && !self.server_bind_ip.trim().is_empty() {
+            self.server_bind_ip.trim()
+        } else {
+            self.host.trim()
+        }
+    }
+
+    pub fn client_bind_ip(&self) -> &str {
+        if self.test_topology == TestTopology::RemoteToRemote {
+            self.remote_client
+                .as_ref()
+                .map(|client| client.bind_ip.trim())
+                .unwrap_or_default()
+        } else {
+            self.local_bind_ip.trim()
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -224,6 +271,7 @@ pub struct RemoteTarget {
     pub ssh_port: u16,
     pub iperf_port: u16,
     pub iperf_path: String,
+    pub bind_ip: String,
     pub username: String,
     pub password: String,
     pub auth_method: SshAuthMethod,
@@ -243,6 +291,17 @@ pub fn validate_remote_iperf_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn validate_bind_ip(value: &str, label: &str) -> Result<(), String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(());
+    }
+    value
+        .parse::<IpAddr>()
+        .map(|_| ())
+        .map_err(|_| format!("{label}必须是有效的 IPv4 或 IPv6 地址"))
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeedStateEvent {
@@ -254,7 +313,7 @@ pub struct SpeedStateEvent {
 #[serde(rename_all = "camelCase")]
 pub struct SpeedPromptEvent {
     pub kind: &'static str,
-    pub title: &'static str,
+    pub title: String,
     pub message: String,
     pub detail: Option<String>,
 }
@@ -277,10 +336,13 @@ mod tests {
 
     fn request(test_mode: TestMode) -> SpeedTestRequest {
         SpeedTestRequest {
+            language: UiLanguage::En,
             host: "10.0.0.8".into(),
             ssh_port: 22,
             iperf_port: 5201,
             remote_iperf_path: String::new(),
+            local_bind_ip: String::new(),
+            server_bind_ip: String::new(),
             server_mode: ServerMode::SshManaged,
             username: "tester".into(),
             password: "secret".into(),
@@ -372,6 +434,7 @@ mod tests {
             host: "10.0.0.9".into(),
             ssh_port: 22,
             remote_iperf_path: "/opt/bin/iperf3".into(),
+            bind_ip: String::new(),
             username: "tester".into(),
             password: "secret".into(),
             auth_method: SshAuthMethod::Password,
@@ -384,5 +447,30 @@ mod tests {
             request.remote_client_target().expect("client target").host,
             "10.0.0.9"
         );
+    }
+
+    #[test]
+    fn validates_ipv4_and_ipv6_bind_addresses() {
+        let mut request = request(TestMode::Standard);
+        request.local_bind_ip = " 192.168.10.4 ".into();
+        request.server_bind_ip = "2001:db8::20".into();
+        assert!(request.validate().is_ok());
+        assert_eq!(request.client_bind_ip(), "192.168.10.4");
+        assert_eq!(request.target_host(), "2001:db8::20");
+
+        request.local_bind_ip = "en0".into();
+        assert!(request.validate().is_err());
+        request.local_bind_ip = "192.168.10.0/24".into();
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn existing_service_ignores_a_stale_server_bind_address() {
+        let mut request = request(TestMode::Standard);
+        request.server_mode = ServerMode::Existing;
+        request.server_bind_ip = "not-an-ip".into();
+        assert!(request.validate().is_ok());
+        assert_eq!(request.target_host(), "10.0.0.8");
+        assert!(request.remote_target().bind_ip.is_empty());
     }
 }
