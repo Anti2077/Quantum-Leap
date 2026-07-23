@@ -2331,6 +2331,12 @@ html[lang="en"] .standard-profile > span {
   box-shadow: inset 0 0 0 1px rgba(246, 184, 74, 0.12), 0 0 18px rgba(246, 184, 74, 0.08);
 }
 
+.rating-overdrive {
+  color: #ffe09a;
+  background: rgba(246, 184, 74, 0.095);
+  box-shadow: inset 0 0 0 1px rgba(246, 184, 74, 0.11), 0 0 14px rgba(246, 184, 74, 0.06);
+}
+
 .rating-prime {
   color: #f7ca6f;
   background: rgba(246, 184, 74, 0.08);
@@ -2341,8 +2347,17 @@ html[lang="en"] .standard-profile > span {
   background: rgba(98, 230, 209, 0.08);
 }
 
+.rating-solid {
+  color: #a9e6f5;
+  background: rgba(76, 174, 214, 0.075);
+}
+
 .rating-npc {
   color: #b8c9c6;
+}
+
+.rating-meh {
+  color: rgba(208, 220, 217, 0.72);
 }
 
 .rating-slow {

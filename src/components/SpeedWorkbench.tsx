@@ -60,6 +60,7 @@ import {
   type BandwidthUnit
 } from "../lib/format";
 import { useI18n, type TranslationKey } from "../lib/i18n";
+import { downloadRating } from "../lib/speed-rating";
 import type {
   SavedServer,
   SpeedPromptEvent,
@@ -381,15 +382,6 @@ function summarize(samples: SamplePoint[], direction?: TransferDirection) {
   };
 }
 
-function downloadRating(bitsPerSecond: number) {
-  const mbps = bitsPerSecond / 1e6;
-  if (mbps > 2500) return { key: "legend", labelKey: "ratingLegend" as const };
-  if (mbps >= 2000) return { key: "prime", labelKey: "ratingPrime" as const };
-  if (mbps >= 800) return { key: "elite", labelKey: "ratingElite" as const };
-  if (mbps >= 50) return { key: "npc", labelKey: "ratingNpc" as const };
-  return { key: "slow", labelKey: "ratingSlow" as const };
-}
-
 export function SpeedWorkbench() {
   const { language, t, formatNumber } = useI18n();
   const previewParameters = import.meta.env.DEV ? new URLSearchParams(window.location.search) : null;
@@ -400,6 +392,7 @@ export function SpeedWorkbench() {
       ? requestedDesignTheme
       : null;
   const resultPreview = designPreviewTheme != null && previewParameters?.get("resultPreview") === "1";
+  const advancedPreview = designPreviewTheme != null && previewParameters?.get("advancedPreview") === "1";
   const promptPreview = designPreviewTheme != null ? previewParameters?.get("promptPreview") : null;
   const previewDirection: TransferDirection | null =
     animationPreviewDirection === "upload" || animationPreviewDirection === "download"
@@ -411,9 +404,12 @@ export function SpeedWorkbench() {
     designPreviewTheme
       ? {
           ...initialForm,
-          host: "edge.apple-lab.net",
-          username: "root",
-          password: "preview-password"
+          host: "edge.example",
+          localBindIp: "192.0.2.10",
+          serverBindIp: "198.51.100.20",
+          username: "operator",
+          password: "preview-password",
+          testMode: advancedPreview ? "advanced" : initialForm.testMode
         }
       : initialForm
   );
@@ -421,8 +417,9 @@ export function SpeedWorkbench() {
     designPreviewTheme
       ? {
           ...initialRemoteClientForm,
-          host: "192.168.10.4",
-          username: "anti",
+          host: "192.0.2.20",
+          bindIp: "192.0.2.20",
+          username: "operator",
           password: "preview-password",
           remoteIperfPath: "/opt/bin/iperf3"
         }
@@ -432,7 +429,7 @@ export function SpeedWorkbench() {
   const [serverSavedId, setServerSavedId] = useState("");
   const [endpointEditor, setEndpointEditor] = useState<"client" | "server" | null>(null);
   const [clientAdvancedOpen, setClientAdvancedOpen] = useState(false);
-  const [serverAdvancedOpen, setServerAdvancedOpen] = useState(false);
+  const [serverAdvancedOpen, setServerAdvancedOpen] = useState(advancedPreview);
   const [samples, setSamples] = useState<SamplePoint[]>(() =>
     designPreviewTheme ? designPreviewSamples() : []
   );
@@ -443,7 +440,7 @@ export function SpeedWorkbench() {
           kind: "existingServer",
           title: t("promptExistingTitle"),
           message: t("promptExistingMessage"),
-          detail: "aliserver.anti2077.xyz:5201"
+          detail: "edge.example:5201"
         }
       : promptPreview === "hostKeyMismatch"
         ? {
@@ -464,16 +461,16 @@ export function SpeedWorkbench() {
                 kind: "serverUnavailable",
                 title: t("promptUnavailableTitle"),
                 message: t("promptUnavailableMessage"),
-                detail: t("serverAddressDetail", { host: "192.168.11.128", port: 5201 })
+                detail: t("serverAddressDetail", { host: "198.51.100.20", port: 5201 })
               }
-          : null
+            : null
   );
   const [savedServers, setSavedServers] = useState<SavedServer[]>(() =>
     designPreviewTheme
       ? [
-          { id: "preview-1", note: t("previewCloud"), host: "aliserver.anti2027.cn", sshPort: 22, iperfPort: 5201, remoteIperfPath: "", bindIp: "", serverMode: "sshManaged", username: "root", password: "preview", authMethod: "password", privateKeyPath: "" },
-          { id: "preview-2", note: t("previewRouter"), host: "192.168.11.1", sshPort: 22, iperfPort: 5201, remoteIperfPath: "", bindIp: "", serverMode: "existing", username: "", password: "", authMethod: "password", privateKeyPath: "" },
-          { id: "preview-3", note: t("previewDevMachine"), host: "192.168.10.4", sshPort: 22, iperfPort: 5201, remoteIperfPath: "/opt/bin/iperf3", bindIp: "192.168.10.4", serverMode: "sshManaged", username: "anti", password: "preview", authMethod: "password", privateKeyPath: "" }
+          { id: "preview-1", note: t("previewCloud"), host: "edge.example", sshPort: 22, iperfPort: 5201, remoteIperfPath: "", bindIp: "", serverMode: "sshManaged", username: "operator", password: "preview", authMethod: "password", privateKeyPath: "" },
+          { id: "preview-2", note: t("previewRouter"), host: "198.51.100.20", sshPort: 22, iperfPort: 5201, remoteIperfPath: "", bindIp: "", serverMode: "existing", username: "", password: "", authMethod: "password", privateKeyPath: "" },
+          { id: "preview-3", note: t("previewDevMachine"), host: "203.0.113.30", sshPort: 22, iperfPort: 5201, remoteIperfPath: "/opt/bin/iperf3", bindIp: "203.0.113.30", serverMode: "sshManaged", username: "operator", password: "preview", authMethod: "password", privateKeyPath: "" }
         ]
       : []
   );
@@ -665,13 +662,14 @@ export function SpeedWorkbench() {
   }, [compactLayout, connectionOpen, endpointEditor]);
 
   useEffect(() => {
+    if (advancedPreview) return;
     if ((compactLayout && !connectionOpen) || (!clientAdvancedOpen && !serverAdvancedOpen)) return;
     const frame = requestAnimationFrame(() => {
       const target = clientAdvancedOpen ? clientAdvancedRef.current : serverAdvancedRef.current;
       target?.scrollIntoView({ block: "nearest" });
     });
     return () => cancelAnimationFrame(frame);
-  }, [clientAdvancedOpen, compactLayout, connectionOpen, serverAdvancedOpen]);
+  }, [advancedPreview, clientAdvancedOpen, compactLayout, connectionOpen, serverAdvancedOpen]);
 
   useEffect(() => {
     if (previousLanguageRef.current === language) return;

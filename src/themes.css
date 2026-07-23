@@ -1175,11 +1175,13 @@ html[data-color-theme="light"] .speed-rating strong {
 }
 
 html[data-color-theme="light"] .speed-rating.rating-legend strong,
+html[data-color-theme="light"] .speed-rating.rating-overdrive strong,
 html[data-color-theme="light"] .speed-rating.rating-prime strong {
   color: var(--color-warning);
 }
 
-html[data-color-theme="light"] .speed-rating.rating-elite strong {
+html[data-color-theme="light"] .speed-rating.rating-elite strong,
+html[data-color-theme="light"] .speed-rating.rating-solid strong {
   color: var(--color-primary-strong);
 }
 

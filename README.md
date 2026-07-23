@@ -1,151 +1,136 @@
+<p align="center">
+  <a href="README.md"><strong>English</strong></a> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
 <div align="center">
-  <img src="src-tauri/icons/128x128@2x.png" width="128" height="128" alt="Quantum Leap 图标">
-  <h1>Quantum Leap（跃迁）</h1>
-  <p>面向 macOS、Windows 与 Linux 的现代化 iperf3 网络性能测试工具</p>
+  <img src="src-tauri/icons/128x128@2x.png" width="128" height="128" alt="Quantum Leap app icon">
+  <h1>Quantum Leap</h1>
+  <p>A modern iperf3 network performance workbench for macOS, Windows, and Linux.</p>
   <p>
-    <a href="https://github.com/Anti2077/Quantum-Leap/releases/latest"><img src="https://img.shields.io/github/v/release/Anti2077/Quantum-Leap?display_name=tag&sort=semver" alt="最新版本"></a>
-    <img src="https://img.shields.io/badge/macOS-13%2B-111111?logo=apple" alt="macOS 13+">
+    <a href="https://github.com/Anti2077/Quantum-Leap/releases/latest"><img src="https://img.shields.io/github/v/release/Anti2077/Quantum-Leap?display_name=tag&sort=semver" alt="Latest release"></a>
+    <img src="https://img.shields.io/badge/macOS-13%2B-111111?logo=apple" alt="macOS 13 or later">
     <img src="https://img.shields.io/badge/Apple_Silicon-arm64-111111?logo=apple" alt="Apple Silicon arm64">
-    <img src="https://img.shields.io/badge/Windows-10%2F11_x64-0078D4?logo=windows" alt="Windows 10/11 x64">
+    <img src="https://img.shields.io/badge/Windows-10%2F11_x64-0078D4?logo=windows" alt="Windows 10 and 11 x64">
     <img src="https://img.shields.io/badge/Linux-x64-FCC624?logo=linux&logoColor=111111" alt="Linux x64">
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0-only"></a>
   </p>
-  <p>
-    <a href="https://github.com/Anti2077/Quantum-Leap/releases/latest"><strong>下载最新版本</strong></a>
-  </p>
+  <p><a href="https://github.com/Anti2077/Quantum-Leap/releases/latest"><strong>Download the latest release</strong></a></p>
 </div>
 
-![Quantum Leap 双端互测结果](docs/images/quantum-leap-dual-result.jpg)
+![Quantum Leap completed speed test](docs/images/readme/overview-light-en.webp)
 
-Quantum Leap 将 SSH 远程管理、`iperf3` 测速和实时可视化整合在一个原生桌面工作台中。它既能测试本机与远端设备之间的链路，也能让两台远端设备直接互测；双端模式下，流量在设备 A 与设备 B 之间传输，不经过本机。
+Quantum Leap combines SSH orchestration, `iperf3` testing, and live visualization in one native desktop workspace. Test the link between this computer and a remote server, or coordinate a direct test between two remote devices without routing test traffic through the local machine.
 
-## 两种测速拓扑
+## Why Quantum Leap
 
-| 模式 | 流量路径 | 适合场景 |
+| | Capability | What it gives you |
 | --- | --- | --- |
-| **本机测速** | 本机 ↔ 远端服务器 | 宽带、局域网、NAS 与云服务器测试；支持 SSH 自动管理或直连已有服务 |
-| **双端互测** | 设备 A ↔ 设备 B | 两台 NAS、服务器或异地设备间的真实链路测试；本机仅负责编排与展示 |
+| **01** | Flexible topologies | Local-to-remote tests, two remote SSH endpoints, or a direct connection to an existing `iperf3 -s` service |
+| **02** | Live measurements | Bandwidth curves, average and peak throughput, transfer totals, RTT, jitter, loss, and TCP retransmissions |
+| **03** | Controlled automation | Remote service startup, reuse confirmation, session-owned cleanup, and SSH host-key verification |
+| **04** | Cross-platform workflow | Native credential storage, English and Simplified Chinese UI, light/dark themes, and responsive layouts |
 
-双端互测支持分别配置两端 SSH 凭据、自定义 `iperf3` 路径，并可一键交换 A/B 方向。应用会管理远端客户端与服务端的生命周期，在停止、失败或切换测试时执行安全清理。
+Additional controls include TCP/UDP selection, upload/download direction, 1-32 parallel streams, timed or continuous tests, custom remote `iperf3` paths, and per-endpoint IPv4/IPv6 binding.
 
-## 功能亮点
+## Test Topologies
 
-- **灵活连接**：本机测速、双 SSH 设备互测、直连已有 `iperf3` 服务
-- **完整认证**：密码、私钥和私钥口令；敏感凭据存入 macOS Keychain、Windows Credential Manager 或 Linux Secret Service
-- **跨平台本机测速**：Windows/Linux 安装包内置经固定源码构建的 `iperf3` 3.21 sidecar
-- **中英双语**：界面、状态提示与后端错误均支持 English 和简体中文，可在应用内即时切换
-- **多网卡控制**：可分别指定本机客户端、远端发起端和服务端的 IPv4/IPv6 绑定地址
-- **远端兼容**：支持自定义绝对路径，并自动搜索 `PATH`、QNAP `/opt/bin/iperf3` 与常见 Entware 位置
-- **实时反馈**：带宽曲线、平均与峰值速率、传输量、RTT、抖动、丢包和 TCP 重传
-- **质量诊断**：展示 TCP 重传次数，并在重传异常偏高时提示可能的链路问题
-- **标准与高级测试**：标准模式自动完成上传/下载；高级模式支持 TCP/UDP、方向、并发数和时长设置
-- **新旧版本兼容**：`iperf3` 3.17+ 优先使用 JSON 流；旧版本自动回退到文本间隔输出
-- **安全进程管理**：复用前明确确认，只清理由当前会话启动且与 PID、端口匹配的远端进程
-- **工作台体验**：可调整连接区与结果区宽度，支持浅色、深色和跟随系统外观
-- **响应式界面**：针对标准窗口和紧凑窗口重新组织连接、测速和结果区域
+| Mode | Traffic path | Best for |
+| --- | --- | --- |
+| **Local test** | This computer ↔ remote server | Broadband, LAN, NAS, and cloud-server checks through SSH management or an existing service |
+| **Device-to-device** | Device A ↔ Device B | Testing the real path between two NAS devices, servers, or sites while this computer only orchestrates and displays |
 
-## 界面预览
+In device-to-device mode, each endpoint has independent SSH credentials, bind addresses, and an optional custom `iperf3` path. Endpoints can be swapped with one action, and temporary remote processes are cleaned up when a test stops, fails, or changes mode.
 
-### 双端互测
+## Interface Tour
 
-分别配置两台远端设备，测试流量直接在两端之间运行。
+### Configure both ends of the path
 
-![Quantum Leap 双 SSH 端点配置](docs/images/quantum-leap-dual-endpoints.jpg)
+Set the initiator and server independently, load saved endpoints, and swap the test direction without rebuilding the connection.
 
-### 本机高级测试
+![Quantum Leap device-to-device endpoint configuration](docs/images/readme/dual-endpoints-dark-en.webp)
 
-按需选择 TCP/UDP、上传/下载、并发数和测试时长。
+### Tune the test and network binding
 
-![Quantum Leap 本机高级测试](docs/images/quantum-leap-local-advanced.jpg)
+Choose TCP or UDP, transfer direction, concurrency, duration, and the exact local or remote IP used for test traffic.
 
-### SSH 认证
+![Quantum Leap advanced test and bind IP controls](docs/images/readme/advanced-bind-dark-en.webp)
 
-使用密码或私钥登录；需要时可填写私钥口令和远端 `iperf3` 路径。
+## Workflows
 
-![Quantum Leap SSH 认证设置](docs/images/quantum-leap-local-auth.jpg)
+- **Local test / SSH managed:** provide the remote SSH connection; Quantum Leap starts, reuses, and safely cleans up the test service.
+- **Local test / Existing service:** connect directly to a persistent Docker, `systemd`, or manually started `iperf3 -s`; Quantum Leap does not stop that service.
+- **Device-to-device:** provide two SSH endpoints; one runs the client and the other runs the server while the local app coordinates the session.
 
-### 直连已有服务
+The standard profile runs TCP with 8 streams, testing upload and download for 10 seconds each. Advanced mode supports TCP or UDP, either direction, 1-32 streams, and 3-120 seconds or continuous operation. UDP uses `-b 0` for an unlimited target bitrate.
 
-无需 SSH 凭据，直接连接 Docker、`systemd` 或其他方式常驻的 `iperf3 -s` 服务。
+## Install
 
-![Quantum Leap 直连已有服务](docs/images/quantum-leap-direct-service.jpg)
+The current public release is **Quantum Leap 1.3.0** for Apple Silicon Macs running macOS 13 or later.
 
-## 系统要求
+1. Download `Quantum-Leap_1.3.0_macOS_arm64.dmg` from [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest).
+2. Open the DMG and drag **Quantum Leap** into **Applications**.
+3. Confirm that every participating macOS or remote device can run `iperf3 --version`.
 
-- macOS 13 Ventura 或更高版本（当前公开 Release 为 Apple Silicon）
-- Windows 10/11 x64，或使用 glibc 的 Ubuntu/Debian x64 桌面环境
-- Windows/Linux 构建内置 `iperf3` 3.21；macOS 本机及所有远端设备建议安装 `iperf3` 3.12 或更高版本
-- Linux 保存敏感凭据需要桌面环境提供 Secret Service
-- SSH 自动管理模式需要账户能够启动和终止自己的 `iperf3` 进程
-- SSH 自动管理和双端互测的远端设备需要 POSIX shell；暂不支持 Windows 远端
-- 直连模式需要目标地址上已有可访问的 `iperf3 -s` 服务
+The public macOS build is ad-hoc signed and is not notarized with Apple Developer ID. If macOS blocks the first launch, right-click the app in Finder and choose **Open**, or allow it under **System Settings -> Privacy & Security**. The Release also includes a SHA-256 checksum file.
 
-Windows/Linux 默认使用安装包内置 sidecar；三平台均可通过 `IPERF3_PATH` 显式覆盖。macOS 还会依次查找 `PATH`、`/opt/homebrew/bin/iperf3` 和 `/usr/local/bin/iperf3`。远端支持自动探测常见安装位置或手动填写绝对路径。
+Windows NSIS, Linux AppImage, and Linux DEB packages are currently produced as CI test artifacts rather than signed public releases. Windows test builds may show a SmartScreen warning.
 
-## 安装
+## Requirements
 
-1. 从 [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest) 下载 `Quantum-Leap_1.3.0_macOS_arm64.dmg`。
-2. 打开 DMG，将 **Quantum Leap** 拖入 **Applications**。
-3. 确认参与测速的设备均可执行 `iperf3 --version`。
+- macOS 13 Ventura or later, Windows 10/11 x64, or an x64 Ubuntu/Debian desktop using glibc
+- `iperf3` 3.12 or later is recommended on macOS and all remote devices
+- Windows and Linux local tests use a bundled, source-pinned `iperf3` 3.21 sidecar by default
+- Linux credential storage requires a desktop Secret Service provider
+- SSH-managed accounts must be able to start and stop their own `iperf3` processes
+- SSH-managed and device-to-device remote endpoints require a POSIX shell; Windows remote endpoints are not currently supported
+- Existing-service mode requires a reachable `iperf3 -s` listener on the target address and port
 
-当前公开构建使用 ad-hoc 签名，尚未经过 Apple Developer ID 公证。macOS 首次启动若阻止运行，请在 Finder 中右键应用并选择“打开”，或前往“系统设置 → 隐私与安全性”确认打开。Release 同时提供 SHA-256 校验文件。
+Set `IPERF3_PATH` to override the local binary on any platform. On macOS, Quantum Leap also searches `PATH`, `/opt/homebrew/bin/iperf3`, and `/usr/local/bin/iperf3`. Remote endpoints can use automatic discovery or an absolute custom path, including common QNAP and Entware locations.
 
-Windows NSIS、Linux AppImage 与 DEB 目前由持续集成生成测试制品，尚未作为正式 Release 发布或签名。Windows 测试制品可能触发 SmartScreen 提示。
+## Security
 
-## 使用方式
+- SSH passwords and private-key passphrases are never written to logs or ordinary configuration files.
+- Saved credentials use macOS Keychain, Windows Credential Manager, or Linux Secret Service.
+- A changed SSH host key displays its SHA-256 fingerprint and requires explicit confirmation for that connection.
+- Existing or reused persistent services are left running after a test.
+- Before terminating a temporary service, Quantum Leap verifies the process command, server mode, port, and session ownership.
 
-在顶部选择 **本机测速** 或 **双端互测**：
+## Development
 
-- **本机测速 / SSH 自动管理**：填写远端 SSH 信息，应用负责启动、复用和清理服务。
-- **本机测速 / 直连已有服务**：只填写服务器地址与测速端口，应用不会终止已有服务。
-- **双端互测**：分别填写设备 A 与设备 B 的 SSH 信息，应用在一端启动客户端、另一端启动服务端。
-
-标准测试固定使用 TCP、8 并发，依次执行 10 秒上传和 10 秒下载。高级测试支持 TCP/UDP、1–32 并发以及 3–120 秒或持续运行；UDP 使用 `-b 0` 进行不限速测试。
-
-## 安全设计
-
-- SSH 密码和私钥口令不会写入日志或普通配置文件。
-- 保存连接时，密码与私钥口令进入当前系统的原生安全存储；macOS 旧版本条目会按需迁移到统一凭据库。
-- 已记录主机的 SSH 密钥发生变化时，应用显示 SHA-256 指纹并要求本次明确确认。
-- 目标端口已有服务时，应用会询问是否复用；直连或复用的持久服务不会被终止。
-- 临时服务清理前会核验进程命令、服务端模式和端口，清理失败会明确报告。
-
-## 贡献者
-
-特别感谢 [Micro-ATP](https://github.com/Micro-ATP) 的贡献：[PR #1](https://github.com/Anti2077/Quantum-Leap/pull/1) 改进了远端 `iperf3` 路径探测、QNAP/Entware 兼容和 TCP 重传诊断，[PR #3](https://github.com/Anti2077/Quantum-Leap/pull/3) 带来了双 SSH 设备互测与完整的远端进程生命周期管理。
-
-欢迎通过 [Issues](https://github.com/Anti2077/Quantum-Leap/issues) 报告问题，也欢迎提交 Pull Request。
-
-## 本地开发
-
-需要 Node.js 20+、Rust stable 及对应平台的 Tauri 构建依赖。macOS 开发需要 Xcode Command Line Tools 和本机 `iperf3` 3.12+。
+Install Node.js 20+, Rust stable, and the Tauri prerequisites for your platform. macOS development also needs Xcode Command Line Tools and local `iperf3` 3.12+.
 
 ```bash
 npm install
 npm run tauri:dev
 ```
 
-Linux/Windows 打包前分别执行 `npm run sidecar:linux` 或 `npm run sidecar:windows`。Windows sidecar 构建需要 Cygwin 的 GCC、make、autoconf、automake 和 curl；生成的二进制与 DLL 位于被 Git 忽略的 `src-tauri/binaries/`。
+Before packaging on Linux or Windows, run `npm run sidecar:linux` or `npm run sidecar:windows`. The Windows sidecar build requires Cygwin with GCC, make, autoconf, automake, and curl. Generated binaries and DLLs are stored in the ignored `src-tauri/binaries/` directory.
 
-验证与构建：
+Validation commands:
 
 ```bash
+npm run typecheck
+npm run test
 npm run build
-npx tsc --noEmit
-cd src-tauri
-cargo test --locked
-cargo clippy --locked -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml --locked
+cargo clippy --manifest-path src-tauri/Cargo.toml --locked -- -D warnings
 ```
 
-## 技术栈
+## Technology
 
-- Tauri 2 + Rust：桌面容器、SSH 会话、进程管理与实时事件
-- React 18 + TypeScript：界面与测速状态机
-- Tailwind CSS + Framer Motion：响应式布局与交互动效
-- `ssh2` + 系统原生凭据库：远端控制与跨平台安全存储
+- **Tauri 2 + Rust:** native desktop shell, SSH sessions, process control, credential integration, and live events
+- **React 18 + TypeScript:** interface, state machine, charts, and responsive workspace behavior
+- **CSS + Framer Motion:** glass surfaces, light/dark themes, transitions, and reduced-motion support
+- **libssh2 + native credential stores:** remote control and secure platform-specific secret storage
 
-## 开源许可
+## Contributors
+
+Special thanks to [Micro-ATP](https://github.com/Micro-ATP): [PR #1](https://github.com/Anti2077/Quantum-Leap/pull/1) improved remote `iperf3` discovery, QNAP/Entware compatibility, and TCP retransmission diagnostics; [PR #3](https://github.com/Anti2077/Quantum-Leap/pull/3) added two-SSH-device testing and full remote process lifecycle management.
+
+Bug reports and pull requests are welcome through [Issues](https://github.com/Anti2077/Quantum-Leap/issues) and the repository contribution workflow.
+
+## License
 
 Copyright (C) 2026 Anti2077
 
-Quantum Leap 以 [GNU General Public License v3.0 only](LICENSE) 发布。你可以使用、研究、修改和分发源码；分发原版或修改版时，需要继续以 GPLv3 提供对应源码和许可证声明。本软件不提供任何担保，完整条款以 `LICENSE` 为准。安装包中的第三方组件说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+Quantum Leap is distributed under the [GNU General Public License v3.0 only](LICENSE). You may use, study, modify, and redistribute it under the terms of GPLv3; redistributed original or modified versions must continue to provide the corresponding source and license notice. The software is provided without warranty. Third-party component notices are available in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
