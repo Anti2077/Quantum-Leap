@@ -6,8 +6,10 @@ use crate::ssh::{
     connect, parse_remote_iperf_error, remote_client_command, SshError, CLIENT_PID_MARKER,
 };
 use serde_json::Value;
+#[cfg(unix)]
+use std::fs;
 use std::{
-    env, fs,
+    env,
     io::{BufRead as _, BufReader as StdBufReader, Read as _},
     path::PathBuf,
     process::Stdio,
@@ -1217,6 +1219,7 @@ mod tests {
         ));
     }
 
+    #[cfg(unix)]
     #[test]
     fn rejects_a_non_executable_iperf3_file() {
         let nonce = std::time::SystemTime::now()
@@ -1226,17 +1229,28 @@ mod tests {
         let path = std::env::temp_dir().join(format!("iperf3-ui-not-executable-{nonce}"));
         std::fs::write(&path, b"not an executable").expect("create temporary file");
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut permissions = std::fs::metadata(&path)
-                .expect("read file metadata")
-                .permissions();
-            permissions.set_mode(0o600);
-            std::fs::set_permissions(&path, permissions).expect("set file permissions");
-        }
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&path)
+            .expect("read file metadata")
+            .permissions();
+        permissions.set_mode(0o600);
+        std::fs::set_permissions(&path, permissions).expect("set file permissions");
 
         assert!(!is_executable(&path));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn accepts_an_existing_windows_iperf3_exe() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("iperf3-ui-executable-{nonce}.exe"));
+        std::fs::write(&path, b"test executable placeholder").expect("create temporary file");
+
+        assert!(is_executable(&path));
         let _ = std::fs::remove_file(path);
     }
 }
