@@ -53,8 +53,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $env:IPERF_SOURCE_WINDOWS = $Source
-$CygSource = (& $Bash -lc 'cygpath -u "$IPERF_SOURCE_WINDOWS"').Trim()
-& $Bash -lc "set -euo pipefail; cd '$CygSource'; ./configure --disable-shared --enable-static --without-openssl --without-sctp; make -j`$(getconf _NPROCESSORS_ONLN)"
+$CygSource = (& $Bash --noprofile --norc -c 'cygpath -u "$IPERF_SOURCE_WINDOWS"').Trim()
+& $Bash --noprofile --norc -c "set -euo pipefail; cd '$CygSource'; ./configure --disable-shared --enable-static --without-openssl --without-sctp; make -j`$(getconf _NPROCESSORS_ONLN)"
 if ($LASTEXITCODE -ne 0) {
   throw "Cygwin iperf build failed with exit code $LASTEXITCODE"
 }
