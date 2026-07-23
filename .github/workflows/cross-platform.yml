@@ -106,11 +106,19 @@ jobs:
       - name: Rust tests with Credential Manager
         shell: pwsh
         run: |
+          $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notlike 'C:\tools\cygwin\bin*' }) -join ';'
           $env:QUANTUM_LEAP_CREDENTIAL_TEST = "1"
           cargo test --manifest-path src-tauri/Cargo.toml --locked
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked -- -D warnings
+      - name: Windows Clippy
+        shell: pwsh
+        run: |
+          $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notlike 'C:\tools\cygwin\bin*' }) -join ';'
+          cargo clippy --manifest-path src-tauri/Cargo.toml --locked -- -D warnings
       - name: Build NSIS installer
-        run: npm run tauri:build -- --bundles nsis
+        shell: pwsh
+        run: |
+          $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notlike 'C:\tools\cygwin\bin*' }) -join ';'
+          npm run tauri:build -- --bundles nsis
       - name: Inspect Windows installer
         shell: pwsh
         run: |
