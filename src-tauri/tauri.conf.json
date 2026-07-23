@@ -32,7 +32,8 @@
     "copyright": "Copyright © 2026 Anti2077",
     "license": "GPL-3.0-only",
     "resources": {
-      "../LICENSE": "LICENSE"
+      "../LICENSE": "LICENSE",
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
     },
     "icon": [
       "icons/32x32.png",
@@ -42,8 +43,8 @@
       "icons/icon.ico"
     ],
     "category": "Utility",
-    "shortDescription": "SSH-powered iperf3 network testing for macOS",
-    "longDescription": "Quantum Leap manages remote iperf3 sessions over SSH and visualizes live TCP and UDP network performance on macOS.",
+    "shortDescription": "Cross-platform SSH-powered iperf3 network testing",
+    "longDescription": "Quantum Leap manages remote iperf3 sessions over SSH and visualizes live TCP and UDP network performance on macOS, Windows, and Linux.",
     "macOS": {
       "minimumSystemVersion": "13.0",
       "signingIdentity": "-",

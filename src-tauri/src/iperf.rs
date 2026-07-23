@@ -18,14 +18,26 @@ use std::{
     time::Instant,
 };
 use tauri::{async_runtime::JoinHandle, AppHandle, Emitter};
+use tauri_plugin_shell::{
+    process::{Command as ShellCommand, CommandEvent},
+    ShellExt,
+};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
+    io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
     sync::{watch, Mutex},
     time::{timeout, Duration},
 };
 
 const REPORT_INTERVAL_SECONDS: &str = "0.5";
+const IPERF3_SIDECAR: &str = "iperf3";
+
+#[derive(Debug, PartialEq, Eq)]
+enum LocalIperfSource {
+    Explicit(PathBuf),
+    Bundled,
+    System,
+}
 
 #[derive(Default)]
 struct PingMetrics {
@@ -38,6 +50,35 @@ struct PingMetrics {
 struct ClientOutput {
     sample_count: u32,
     error: Option<String>,
+}
+
+#[derive(Default)]
+struct LineBuffer {
+    pending: Vec<u8>,
+}
+
+impl LineBuffer {
+    fn push(&mut self, chunk: &[u8]) -> Vec<Vec<u8>> {
+        self.pending.extend_from_slice(chunk);
+        let mut lines = Vec::new();
+        while let Some(index) = self.pending.iter().position(|byte| *byte == b'\n') {
+            let mut line = self.pending.drain(..=index).collect::<Vec<_>>();
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            lines.push(line);
+        }
+        lines
+    }
+
+    fn finish(&mut self) -> Option<Vec<u8>> {
+        if self.pending.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.pending))
+        }
+    }
 }
 
 impl PingMetrics {
@@ -113,11 +154,35 @@ fn parse_error_line(line: &str) -> Option<String> {
     (!detail.is_empty()).then(|| detail.to_owned())
 }
 
+fn configured_iperf3_binary() -> Result<Option<PathBuf>, String> {
+    let Some(configured) = env::var_os("IPERF3_PATH") else {
+        return Ok(None);
+    };
+    let path = PathBuf::from(configured);
+    if is_executable(&path) {
+        Ok(Some(path))
+    } else {
+        Err(format!(
+            "IPERF3_PATH 指向的文件不可执行：{}",
+            path.display()
+        ))
+    }
+}
+
+fn select_local_iperf_source(
+    configured: Option<PathBuf>,
+    use_bundled_default: bool,
+) -> LocalIperfSource {
+    match configured {
+        Some(path) => LocalIperfSource::Explicit(path),
+        None if use_bundled_default => LocalIperfSource::Bundled,
+        None => LocalIperfSource::System,
+    }
+}
+
+#[cfg(target_os = "macos")]
 fn resolve_iperf3_binary() -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
-    if let Some(configured) = env::var_os("IPERF3_PATH") {
-        candidates.push(PathBuf::from(configured));
-    }
     if let Some(path) = env::var_os("PATH") {
         candidates.extend(env::split_paths(&path).map(|directory| directory.join("iperf3")));
     }
@@ -131,6 +196,30 @@ fn resolve_iperf3_binary() -> Result<PathBuf, String> {
         .into_iter()
         .find(is_executable)
         .ok_or_else(|| "本机未找到 iperf3；请使用 Homebrew 安装，或设置 IPERF3_PATH".into())
+}
+
+fn local_iperf_command(app: &AppHandle) -> Result<ShellCommand, String> {
+    match select_local_iperf_source(
+        configured_iperf3_binary()?,
+        cfg!(any(target_os = "linux", target_os = "windows")),
+    ) {
+        LocalIperfSource::Explicit(binary) => Ok(app.shell().command(binary)),
+        LocalIperfSource::Bundled => app
+            .shell()
+            .sidecar(IPERF3_SIDECAR)
+            .map_err(|error| format!("内置 iperf3 不可用，应用安装可能不完整：{error}")),
+        LocalIperfSource::System => {
+            #[cfg(target_os = "macos")]
+            {
+                let binary = resolve_iperf3_binary()?;
+                Ok(app.shell().command(binary))
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Err("内置 iperf3 不可用，应用安装可能不完整".into())
+            }
+        }
+    }
 }
 
 fn is_executable(path: &PathBuf) -> bool {
@@ -163,21 +252,35 @@ async fn wait_for_cancel(cancel: &mut watch::Receiver<bool>) {
     }
 }
 
-fn parse_ping_latency(line: &str) -> Option<f64> {
-    let (marker, offset) = if let Some(index) = line.find("time=") {
-        (index, 5)
-    } else {
-        let index = line.find("time<")?;
-        (index, 5)
-    };
-    let value = line[marker + offset..]
-        .trim_start()
-        .chars()
-        .take_while(|character| character.is_ascii_digit() || *character == '.')
-        .collect::<String>()
-        .parse::<f64>()
-        .ok()?;
-    (value.is_finite() && value >= 0.0).then_some(value)
+fn parse_ping_latency(line: &[u8]) -> Option<f64> {
+    for (index, pair) in line.windows(2).enumerate() {
+        if !pair[0].eq_ignore_ascii_case(&b'm') || !pair[1].eq_ignore_ascii_case(&b's') {
+            continue;
+        }
+        let mut end = index;
+        while end > 0 && line[end - 1].is_ascii_whitespace() {
+            end -= 1;
+        }
+        let mut start = end;
+        while start > 0 && (line[start - 1].is_ascii_digit() || line[start - 1] == b'.') {
+            start -= 1;
+        }
+        let mut marker = start;
+        while marker > 0 && line[marker - 1].is_ascii_whitespace() {
+            marker -= 1;
+        }
+        if marker == 0 || !matches!(line[marker - 1], b'=' | b'<') {
+            continue;
+        }
+        let value = std::str::from_utf8(&line[start..end])
+            .ok()?
+            .parse::<f64>()
+            .ok()?;
+        if value.is_finite() && value >= 0.0 {
+            return Some(value);
+        }
+    }
+    None
 }
 
 fn spawn_ping(host: &str, metrics: Arc<Mutex<PingMetrics>>) -> Option<(Child, JoinHandle<()>)> {
@@ -207,9 +310,11 @@ fn spawn_ping(host: &str, metrics: Arc<Mutex<PingMetrics>>) -> Option<(Child, Jo
     let mut child = command.spawn().ok()?;
     let stdout = child.stdout.take()?;
     let task = tauri::async_runtime::spawn(async move {
-        let mut lines = BufReader::new(stdout).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
+        let mut reader = BufReader::new(stdout);
+        let mut line = Vec::new();
+        while reader.read_until(b'\n', &mut line).await.is_ok() && !line.is_empty() {
             let Some(latency_ms) = parse_ping_latency(&line) else {
+                line.clear();
                 continue;
             };
             let mut current = metrics.lock().await;
@@ -218,6 +323,7 @@ fn spawn_ping(host: &str, metrics: Arc<Mutex<PingMetrics>>) -> Option<(Child, Jo
                 .map(|previous| (latency_ms - previous).abs());
             current.latency_ms = Some(latency_ms);
             current.updated_at = Some(Instant::now());
+            line.clear();
         }
     });
     Some((child, task))
@@ -270,8 +376,11 @@ fn client_args(
     args
 }
 
-async fn supports_json_stream(binary: &PathBuf) -> bool {
-    Command::new(binary)
+async fn supports_json_stream(app: &AppHandle) -> bool {
+    let Ok(command) = local_iperf_command(app) else {
+        return false;
+    };
+    command
         .arg("--help")
         .output()
         .await
@@ -283,6 +392,37 @@ async fn supports_json_stream(binary: &PathBuf) -> bool {
         .unwrap_or(false)
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn process_local_output_line(
+    line: &[u8],
+    app: &AppHandle,
+    output: &mut ClientOutput,
+    previous_latency_ms: &mut Option<f64>,
+    ping_metrics: &Arc<Mutex<PingMetrics>>,
+    direction: TransferDirection,
+    protocol: TransportProtocol,
+    parallel_streams: u8,
+) {
+    let line = String::from_utf8_lossy(line);
+    if let Some(mut sample) = parse_sample(&line, direction)
+        .or_else(|| parse_text_sample(&line, direction, parallel_streams))
+    {
+        if sample.latency_ms.is_none() {
+            if let Some((latency_ms, jitter_ms)) = ping_metrics.lock().await.fresh_values() {
+                sample.latency_ms = Some(latency_ms);
+                if protocol == TransportProtocol::Tcp && sample.jitter_ms.is_none() {
+                    sample.jitter_ms = jitter_ms;
+                }
+            }
+        }
+        add_tcp_latency_jitter(&mut sample, previous_latency_ms);
+        output.sample_count += 1;
+        let _ = app.emit("speed://sample", sample);
+    } else if let Some(error) = parse_error_line(&line) {
+        output.error = Some(error);
+    }
+}
+
 pub async fn run_local_client(
     app: &AppHandle,
     request: &SpeedTestRequest,
@@ -292,10 +432,9 @@ pub async fn run_local_client(
     duration_seconds: u16,
     cancel: &mut watch::Receiver<bool>,
 ) -> Result<(), RunError> {
-    let binary = resolve_iperf3_binary().map_err(RunError::Message)?;
-    let json_stream = supports_json_stream(&binary).await;
-    let mut command = Command::new(binary);
-    command
+    let json_stream = supports_json_stream(app).await;
+    let command = local_iperf_command(app)
+        .map_err(RunError::Message)?
         .args(client_args(
             request.target_host(),
             request.client_bind_ip(),
@@ -306,102 +445,99 @@ pub async fn run_local_client(
             duration_seconds,
             json_stream,
         ))
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+        .set_raw_out(true);
 
-    let mut child = command
+    let (mut events, child) = command
         .spawn()
         .map_err(|err| RunError::Message(format!("启动本地 iperf3 失败：{err}")))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| RunError::Message("无法读取 iperf3 标准输出".into()))?;
-    let mut stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| RunError::Message("无法读取 iperf3 错误输出".into()))?;
+    let mut child = Some(child);
 
     let ping_metrics = Arc::new(Mutex::new(PingMetrics::default()));
     let mut ping_process = spawn_ping(request.target_host(), ping_metrics.clone());
 
-    let app_for_output = app.clone();
-    let stdout_task = tauri::async_runtime::spawn(async move {
-        let mut lines = BufReader::new(stdout).lines();
-        let mut output = ClientOutput::default();
-        let mut previous_latency_ms = None;
-        while let Ok(Some(line)) = lines.next_line().await {
-            if let Some(mut sample) = parse_sample(&line, direction)
-                .or_else(|| parse_text_sample(&line, direction, parallel_streams))
-            {
-                if let Some((latency_ms, jitter_ms)) = ping_metrics.lock().await.fresh_values() {
-                    sample.latency_ms = Some(latency_ms);
-                    if protocol == TransportProtocol::Tcp {
-                        sample.jitter_ms = jitter_ms;
+    let mut stdout = LineBuffer::default();
+    let mut stderr = Vec::new();
+    let mut output = ClientOutput::default();
+    let mut previous_latency_ms = None;
+    let mut exit_code = None;
+    let mut shell_error = None;
+    let cancelled = loop {
+        tokio::select! {
+            _ = wait_for_cancel(cancel) => {
+                if let Some(child) = child.take() {
+                    let _ = child.kill();
+                }
+                break true;
+            }
+            event = events.recv() => match event {
+                Some(CommandEvent::Stdout(chunk)) => {
+                    for line in stdout.push(&chunk) {
+                        process_local_output_line(
+                            &line,
+                            app,
+                            &mut output,
+                            &mut previous_latency_ms,
+                            &ping_metrics,
+                            direction,
+                            protocol,
+                            parallel_streams,
+                        ).await;
                     }
                 }
-                add_tcp_latency_jitter(&mut sample, &mut previous_latency_ms);
-                output.sample_count += 1;
-                let _ = app_for_output.emit("speed://sample", sample);
-            } else if let Some(error) = parse_error_line(&line) {
-                output.error = Some(error);
+                Some(CommandEvent::Stderr(chunk)) => stderr.extend_from_slice(&chunk),
+                Some(CommandEvent::Error(error)) => shell_error = Some(error),
+                Some(CommandEvent::Terminated(status)) => {
+                    exit_code = status.code;
+                    break false;
+                }
+                Some(_) => continue,
+                None => break false,
             }
-        }
-        output
-    });
-    let stderr_task = tauri::async_runtime::spawn(async move {
-        let mut output = String::new();
-        let _ = stderr.read_to_string(&mut output).await;
-        output
-    });
-
-    let cancelled = tokio::select! {
-        _ = wait_for_cancel(cancel) => {
-            let _ = child.start_kill();
-            let _ = timeout(Duration::from_secs(2), child.wait()).await;
-            true
-        }
-        result = child.wait() => {
-            let status = result
-                .map_err(|err| RunError::Message(format!("等待本地 iperf3 退出失败：{err}")))?;
-            if !status.success() {
-                let stderr = stderr_task.await.unwrap_or_default();
-                let stdout = stdout_task.await.unwrap_or_default();
-                let detail = if stderr.trim().is_empty() {
-                    stdout.error.as_deref().unwrap_or_default()
-                } else {
-                    stderr.trim()
-                };
-                let error = if !request.client_bind_ip().is_empty() && rejects_bind_option(detail) {
-                    bind_unsupported_error("本机客户端", detail)
-                } else if should_report_server_unavailable(request, detail) {
-                    RunError::ServerUnavailable
-                } else if detail.is_empty() {
-                    RunError::Message(format!("iperf3 异常退出：{status}"))
-                } else {
-                    RunError::Message(format!("iperf3 测速失败：{detail}"))
-                };
-                stop_ping(&mut ping_process).await;
-                return Err(error);
-            }
-            false
         }
     };
 
     stop_ping(&mut ping_process).await;
-    let stdout = stdout_task.await.unwrap_or_default();
+    if let Some(line) = stdout.finish() {
+        process_local_output_line(
+            &line,
+            app,
+            &mut output,
+            &mut previous_latency_ms,
+            &ping_metrics,
+            direction,
+            protocol,
+            parallel_streams,
+        )
+        .await;
+    }
     if cancelled {
-        let _ = stderr_task.await;
         return Err(RunError::Cancelled);
     }
 
-    let stderr = stderr_task.await.unwrap_or_default();
-    if stdout.sample_count == 0 {
-        let detail = if stderr.trim().is_empty() {
-            stdout.error.as_deref().unwrap_or_default()
-        } else {
-            stderr.trim()
-        };
+    let stderr = String::from_utf8_lossy(&stderr);
+    let detail = if stderr.trim().is_empty() {
+        output
+            .error
+            .as_deref()
+            .or(shell_error.as_deref())
+            .unwrap_or_default()
+    } else {
+        stderr.trim()
+    };
+    if exit_code != Some(0) {
+        return Err(
+            if !request.client_bind_ip().is_empty() && rejects_bind_option(detail) {
+                bind_unsupported_error("本机客户端", detail)
+            } else if should_report_server_unavailable(request, detail) {
+                RunError::ServerUnavailable
+            } else if detail.is_empty() {
+                RunError::Message(format!("iperf3 异常退出：{}", exit_code.unwrap_or(-1)))
+            } else {
+                RunError::Message(format!("iperf3 测速失败：{detail}"))
+            },
+        );
+    }
+    if output.sample_count == 0 {
         if !request.client_bind_ip().is_empty() && rejects_bind_option(detail) {
             return Err(bind_unsupported_error("本机客户端", detail));
         }
@@ -873,14 +1009,49 @@ mod tests {
     #[test]
     fn parses_macos_and_linux_ping_latency() {
         assert_eq!(
-            parse_ping_latency("64 bytes from 192.168.11.1: icmp_seq=3 ttl=64 time=6.276 ms"),
+            parse_ping_latency(b"64 bytes from 192.168.11.1: icmp_seq=3 ttl=64 time=6.276 ms"),
             Some(6.276)
         );
         assert_eq!(
-            parse_ping_latency("64 bytes from 127.0.0.1: icmp_seq=0 ttl=64 time<1 ms"),
+            parse_ping_latency(b"64 bytes from 127.0.0.1: icmp_seq=0 ttl=64 time<1 ms"),
             Some(1.0)
         );
-        assert_eq!(parse_ping_latency("Request timeout for icmp_seq 4"), None);
+        assert_eq!(parse_ping_latency(b"Request timeout for icmp_seq 4"), None);
+    }
+
+    #[test]
+    fn parses_localized_non_utf8_windows_ping_latency() {
+        let cp936_line = b"\xca\xb1\xbc\xe4=12.5ms TTL=64";
+        assert_eq!(parse_ping_latency(cp936_line), Some(12.5));
+        assert_eq!(parse_ping_latency(b"time<1ms TTL=128"), Some(1.0));
+    }
+
+    #[test]
+    fn buffers_fragmented_process_output_by_line() {
+        let mut buffer = LineBuffer::default();
+        assert!(buffer.push(b"{\"event\":\"inter").is_empty());
+        assert_eq!(
+            buffer.push(b"val\"}\r\nsecond\npart"),
+            vec![b"{\"event\":\"interval\"}".to_vec(), b"second".to_vec()]
+        );
+        assert_eq!(buffer.finish(), Some(b"part".to_vec()));
+    }
+
+    #[test]
+    fn selects_explicit_sidecar_and_system_sources_in_priority_order() {
+        let override_path = PathBuf::from("/custom/iperf3");
+        assert_eq!(
+            select_local_iperf_source(Some(override_path.clone()), true),
+            LocalIperfSource::Explicit(override_path)
+        );
+        assert_eq!(
+            select_local_iperf_source(None, true),
+            LocalIperfSource::Bundled
+        );
+        assert_eq!(
+            select_local_iperf_source(None, false),
+            LocalIperfSource::System
+        );
     }
 
     #[test]

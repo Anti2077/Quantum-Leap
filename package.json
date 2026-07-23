@@ -10,6 +10,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
+    "sidecar:linux": "bash scripts/build-iperf-linux.sh",
+    "sidecar:windows": "powershell -ExecutionPolicy Bypass -File scripts/build-iperf-windows.ps1",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },

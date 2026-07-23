@@ -1,7 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clampChartTooltipPercent } from "./chart";
 import { shouldScheduleParticleFrame } from "./motion";
+import { detectRuntimePlatform } from "./platform";
 import { applyTheme, setThemeMode, subscribeTheme } from "./theme";
+
+describe("runtime platform detection", () => {
+  it("maps desktop webview user agents to supported platforms", () => {
+    expect(detectRuntimePlatform("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")).toBe("windows");
+    expect(detectRuntimePlatform("Mozilla/5.0 (X11; Linux x86_64)")).toBe("linux");
+    expect(detectRuntimePlatform("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)")).toBe("macos");
+  });
+});
 
 describe("chart tooltip positioning", () => {
   it("keeps edge tooltips inside the chart", () => {

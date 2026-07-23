@@ -4,6 +4,7 @@ dist/
 test_file/
 *.app/
 src-tauri/target/
+src-tauri/binaries/
 *.xcuserstate
 xcuserdata/
 

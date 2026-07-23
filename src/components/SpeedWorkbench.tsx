@@ -78,7 +78,7 @@ import { ComparisonChart } from "./ComparisonChart";
 import { DataStreamField } from "./DataStreamField";
 import { FluidAreaChart } from "./FluidAreaChart";
 import { GlassPanel } from "./GlassPanel";
-import { MacGlyph } from "./MacGlyph";
+import { LocalDeviceGlyph } from "./LocalDeviceGlyph";
 import { NumberTicker } from "./NumberTicker";
 import { AppSettings } from "./AppSettings";
 
@@ -2054,9 +2054,9 @@ export function SpeedWorkbench() {
             </div>
 
             <div className="network-stage">
-              <MacGlyph
+              <LocalDeviceGlyph
                 active={running || status.phase === "stopping"}
-                label={remoteToRemote ? clientForm.host.trim() || t("deviceA") : t("thisMac")}
+                label={remoteToRemote ? clientForm.host.trim() || t("deviceA") : t("thisDevice")}
                 subtitle={remoteToRemote ? t("remoteClient") : t("localClient")}
               />
               <EnergyLink

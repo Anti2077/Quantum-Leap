@@ -104,6 +104,11 @@ input:focus-visible {
   -webkit-user-select: none;
 }
 
+:root[data-platform="windows"] .titlebar,
+:root[data-platform="linux"] .titlebar {
+  padding-left: 24px;
+}
+
 .brand-mark,
 .titlebar-state {
   display: flex;

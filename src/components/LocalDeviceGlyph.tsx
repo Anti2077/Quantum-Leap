@@ -2,7 +2,7 @@ import Laptop from "lucide-react/dist/esm/icons/laptop.js";
 import { memo } from "react";
 import { useI18n } from "../lib/i18n";
 
-function MacGlyphComponent({
+function LocalDeviceGlyphComponent({
   active,
   label,
   subtitle
@@ -25,11 +25,11 @@ function MacGlyphComponent({
         <span className="mac-coupling-flash" aria-hidden="true" />
       </div>
       <div className="node-label">
-        <strong>{label ?? t("thisMac")}</strong>
+        <strong>{label ?? t("thisDevice")}</strong>
         <span>{subtitle ?? t("localClient")}</span>
       </div>
     </div>
   );
 }
 
-export const MacGlyph = memo(MacGlyphComponent);
+export const LocalDeviceGlyph = memo(LocalDeviceGlyphComponent);

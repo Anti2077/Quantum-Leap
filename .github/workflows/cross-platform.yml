@@ -1,0 +1,141 @@
+name: Cross-platform desktop builds
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x64:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl file libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libdbus-1-dev dbus-x11 gnome-keyring
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Build and smoke-test iperf3 sidecar
+        run: |
+          npm run sidecar:linux
+          scripts/smoke-test-iperf-sidecar.sh src-tauri/binaries/iperf3-x86_64-unknown-linux-gnu
+          file src-tauri/binaries/iperf3-x86_64-unknown-linux-gnu
+      - name: Rust tests with Secret Service
+        run: |
+          dbus-run-session -- bash -c '
+            eval "$(printf "\n" | gnome-keyring-daemon --unlock --components=secrets)"
+            export QUANTUM_LEAP_CREDENTIAL_TEST=1
+            cargo test --manifest-path src-tauri/Cargo.toml --locked
+          '
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked -- -D warnings
+      - name: Build AppImage and DEB
+        run: npm run tauri:build -- --bundles appimage,deb
+      - name: Inspect Linux packages
+        run: |
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' -print -quit)
+          DEB=$(find src-tauri/target/release/bundle/deb -name '*.deb' -print -quit)
+          chmod +x "$APPIMAGE"
+          (cd /tmp && "$GITHUB_WORKSPACE/$APPIMAGE" --appimage-extract >/dev/null)
+          find /tmp/squashfs-root -type f | grep -E '/iperf3$'
+          find /tmp/squashfs-root -type f | grep -E 'third-party/iperf3-LICENSE$'
+          find /tmp/squashfs-root -type f | grep -E '/LICENSE$'
+          find /tmp/squashfs-root -type f | grep -E '/THIRD_PARTY_NOTICES.md$'
+          dpkg-deb --contents "$DEB" | grep -E '/iperf3$'
+          dpkg-deb --contents "$DEB" | grep -E 'third-party/iperf3-LICENSE$'
+          dpkg-deb --contents "$DEB" | grep -E '/LICENSE$'
+          dpkg-deb --contents "$DEB" | grep -E '/THIRD_PARTY_NOTICES.md$'
+          sha256sum "$APPIMAGE" "$DEB" > src-tauri/target/release/bundle/SHA256SUMS-linux-x64.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quantum-leap-linux-x64-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/SHA256SUMS-linux-x64.txt
+
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Install Cygwin build dependencies
+        uses: egor-tensin/setup-cygwin@v4
+        with:
+          platform: x64
+          packages: gcc-core make autoconf automake libtool
+      - name: Build and smoke-test iperf3 sidecar
+        shell: pwsh
+        run: |
+          npm run sidecar:windows
+          scripts/smoke-test-iperf-sidecar.ps1 -Binary src-tauri/binaries/iperf3-x86_64-pc-windows-msvc.exe
+      - name: Rust tests with Credential Manager
+        shell: pwsh
+        run: |
+          $env:QUANTUM_LEAP_CREDENTIAL_TEST = "1"
+          cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked -- -D warnings
+      - name: Build NSIS installer
+        run: npm run tauri:build -- --bundles nsis
+      - name: Inspect Windows installer
+        shell: pwsh
+        run: |
+          $Installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          $Extract = Join-Path $env:RUNNER_TEMP "quantum-leap-nsis"
+          New-Item -ItemType Directory -Force -Path $Extract | Out-Null
+          7z x $Installer.FullName "-o$Extract" -y | Out-Null
+          Get-ChildItem $Extract -Recurse -Filter *.7z | ForEach-Object {
+            7z x $_.FullName "-o$Extract\payload" -y | Out-Null
+          }
+          $Files = Get-ChildItem $Extract -Recurse -File | ForEach-Object { $_.FullName }
+          if (-not ($Files | Where-Object { $_ -match "iperf3\.exe$" })) { throw "NSIS installer does not contain iperf3" }
+          if (-not ($Files | Where-Object { $_ -match "cygwin1\.dll$" })) { throw "NSIS installer does not contain cygwin1.dll" }
+          if (-not ($Files | Where-Object { $_ -match "iperf3-LICENSE$" })) { throw "NSIS installer does not contain the iperf3 license" }
+          if (-not ($Files | Where-Object { $_ -match "cygwin-LICENSE$" })) { throw "NSIS installer does not contain the Cygwin license" }
+          if (-not ($Files | Where-Object { (Split-Path $_ -Leaf) -eq "LICENSE" })) { throw "NSIS installer does not contain the application license" }
+          if (-not ($Files | Where-Object { $_ -match "THIRD_PARTY_NOTICES\.md$" })) { throw "NSIS installer does not contain third-party notices" }
+          $Hash = Get-FileHash -Algorithm SHA256 $Installer.FullName
+          "$($Hash.Hash.ToLowerInvariant())  $($Installer.Name)" | Set-Content -Encoding ascii src-tauri/target/release/bundle/SHA256SUMS-windows-x64.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quantum-leap-windows-x64-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/SHA256SUMS-windows-x64.txt

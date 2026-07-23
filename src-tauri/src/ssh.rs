@@ -1,10 +1,9 @@
 use crate::model::{RemoteTarget, SshAuthMethod};
 use ssh2::{CheckResult, HashType, KnownHostFileKind, Session};
 use std::{
-    env,
     io::Read,
     net::{SocketAddr, TcpStream, ToSocketAddrs},
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -190,19 +189,23 @@ pub(crate) fn connect(remote: &RemoteTarget) -> Result<Session, SshError> {
     Ok(session)
 }
 
-fn resolve_private_key(path: &str) -> Result<PathBuf, SshError> {
+fn expand_user_path(path: &str, home: Option<&Path>) -> Result<PathBuf, SshError> {
     let path = path.trim();
-    let path = if path == "~" || path.starts_with("~/") {
-        let home = env::var_os("HOME")
-            .ok_or_else(|| SshError::Message("无法确定用户主目录，不能展开私钥路径".into()))?;
+    if path == "~" || path.starts_with("~/") {
+        let home =
+            home.ok_or_else(|| SshError::Message("无法确定用户主目录，不能展开私钥路径".into()))?;
         if path == "~" {
-            PathBuf::from(home)
+            Ok(home.to_path_buf())
         } else {
-            PathBuf::from(home).join(&path[2..])
+            Ok(home.join(&path[2..]))
         }
     } else {
-        PathBuf::from(path)
-    };
+        Ok(PathBuf::from(path))
+    }
+}
+
+fn resolve_private_key(path: &str) -> Result<PathBuf, SshError> {
+    let path = expand_user_path(path, dirs::home_dir().as_deref())?;
 
     if !path.is_file() {
         return Err(SshError::Message(format!(
@@ -214,10 +217,10 @@ fn resolve_private_key(path: &str) -> Result<PathBuf, SshError> {
 }
 
 fn verify_known_host(session: &Session, remote: &RemoteTarget) -> Result<(), SshError> {
-    let Some(home) = env::var_os("HOME") else {
+    let Some(home) = dirs::home_dir() else {
         return Ok(());
     };
-    let path = PathBuf::from(home).join(".ssh/known_hosts");
+    let path = home.join(".ssh/known_hosts");
     if !path.is_file() {
         return Ok(());
     }
@@ -629,6 +632,7 @@ mod tests {
         assert!(command.contains("ps -p \"$candidate\" -o args="));
         assert!(command.contains(" -p $port "));
         assert!(command.contains("端口 $port 仍有服务端进程"));
+        #[cfg(unix)]
         assert!(std::process::Command::new("sh")
             .args(["-c", &command])
             .status()
@@ -698,6 +702,7 @@ mod tests {
         let command = cleanup_remote_client_command(u32::MAX, "192.168.10.20", u16::MAX);
         assert!(command.contains(" -c $target "));
         assert!(command.contains(" -p $port "));
+        #[cfg(unix)]
         assert!(std::process::Command::new("sh")
             .args(["-c", &command])
             .status()
@@ -713,6 +718,24 @@ mod tests {
             Err(SshError::Message(
                 "远端 iperf3 路径不可执行：/opt/bin/missing".into()
             ))
+        );
+    }
+
+    #[test]
+    fn expands_cross_platform_ssh_paths() {
+        let home = Path::new("/home/tester");
+        assert_eq!(
+            expand_user_path("~/.ssh/id_ed25519", Some(home)).expect("expand home"),
+            home.join(".ssh/id_ed25519")
+        );
+        assert_eq!(
+            expand_user_path(r"C:\Users\tester\.ssh\id_ed25519", Some(home))
+                .expect("keep Windows path"),
+            PathBuf::from(r"C:\Users\tester\.ssh\id_ed25519")
+        );
+        assert_eq!(
+            expand_user_path(r"\\server\keys\id_ed25519", Some(home)).expect("keep UNC path"),
+            PathBuf::from(r"\\server\keys\id_ed25519")
         );
     }
 }

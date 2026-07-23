@@ -591,6 +591,7 @@ fn cleanup_before_exit(app: &tauri::AppHandle) {
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_shell::init())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             start_speed_test,

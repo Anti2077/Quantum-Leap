@@ -4,13 +4,15 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager};
+
+#[cfg(any(target_os = "macos", test))]
+use std::collections::BTreeMap;
 
 #[cfg(target_os = "macos")]
 use std::sync::MutexGuard;
@@ -21,14 +23,48 @@ use security_framework::passwords::{
 };
 
 const KEYCHAIN_SERVICE: &str = "com.anti2077.quantumleap.saved-server";
+#[cfg(target_os = "macos")]
 const KEYCHAIN_VAULT_ACCOUNT: &str = "credential-vault-v1";
+#[cfg(target_os = "macos")]
 const KEYCHAIN_ITEM_NOT_FOUND: i32 = -25300;
 const METADATA_FILE: &str = "saved-servers.json";
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn credential_entry(id: &str) -> Result<keyring::Entry, String> {
+    credential_entry_for(KEYCHAIN_SERVICE, id)
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn credential_entry_for(service: &str, id: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(service, id).map_err(|error| format!("无法打开系统凭据存储：{error}"))
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn keychain_set(id: &str, password: &str) -> Result<(), String> {
+    credential_entry(id)?
+        .set_password(password)
+        .map_err(|error| format!("保存密码到系统凭据存储失败：{error}"))
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn keychain_get(id: &str) -> Result<String, String> {
+    credential_entry(id)?
+        .get_password()
+        .map_err(|error| format!("从系统凭据存储读取密码失败：{error}"))
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn keychain_delete(id: &str) {
+    if let Ok(entry) = credential_entry(id) {
+        let _ = entry.delete_credential();
+    }
+}
 
 // Serialize read-modify-write operations so concurrent commands cannot lose a
 // saved endpoint or race on the shared temporary metadata file.
 static METADATA_LOCK: Mutex<()> = Mutex::new(());
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 struct CredentialVault {
     #[serde(default)]
@@ -487,5 +523,25 @@ mod tests {
 
         assert_eq!(restored, vault);
         assert_eq!(restored.credentials.len(), 2);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn native_credential_store_round_trip_when_enabled() {
+        if std::env::var_os("QUANTUM_LEAP_CREDENTIAL_TEST").is_none() {
+            return;
+        }
+        let service = format!("{KEYCHAIN_SERVICE}.integration-test.{}", new_id());
+        let id = format!("integration-test-{}", new_id());
+        let entry = credential_entry_for(&service, &id).expect("open credential store");
+        entry
+            .set_password("temporary-secret")
+            .expect("store credential");
+        assert_eq!(
+            entry.get_password().expect("read credential"),
+            "temporary-secret"
+        );
+        entry.delete_credential().expect("delete credential");
+        assert!(entry.get_password().is_err());
     }
 }
