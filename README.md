@@ -65,15 +65,15 @@ The standard profile runs TCP with 8 streams, testing upload and download for 10
 
 ## Install
 
-The current public release is **Quantum Leap 1.3.0** for Apple Silicon Macs running macOS 13 or later.
+The current public release is **Quantum Leap 1.3.1** for macOS ARM64, Windows x64, and Linux x64.
 
-1. Download `Quantum-Leap_1.3.0_macOS_arm64.dmg` from [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest).
-2. Open the DMG and drag **Quantum Leap** into **Applications**.
-3. Confirm that every participating macOS or remote device can run `iperf3 --version`.
+1. Open [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest) and download the package for your platform.
+2. On macOS, open the DMG and drag **Quantum Leap** into **Applications**. On Windows, run the NSIS installer. On Linux, use the AppImage or install the DEB package.
+3. macOS and remote devices must provide `iperf3`; Windows and Linux local tests use the bundled `iperf3` sidecar by default.
 
 The public macOS build is ad-hoc signed and is not notarized with Apple Developer ID. If macOS blocks the first launch, right-click the app in Finder and choose **Open**, or allow it under **System Settings -> Privacy & Security**. The Release also includes a SHA-256 checksum file.
 
-Windows NSIS, Linux AppImage, and Linux DEB packages are currently produced as CI test artifacts rather than signed public releases. Windows test builds may show a SmartScreen warning.
+Windows NSIS, Linux AppImage, and Linux DEB packages are published as unsigned Release assets. Windows may show a SmartScreen warning; verify downloads against the attached SHA-256 manifest before installing.
 
 ## Requirements
 
