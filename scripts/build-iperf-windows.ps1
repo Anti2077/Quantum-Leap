@@ -14,12 +14,16 @@ $LicenseOutput = Join-Path $Output "licenses"
 $CygwinRoot = if ($env:CYGWIN_ROOT) { $env:CYGWIN_ROOT } else { "C:\tools\cygwin" }
 $Bash = Join-Path $CygwinRoot "bin\bash.exe"
 $Cygcheck = Join-Path $CygwinRoot "bin\cygcheck.exe"
+$Tar = Join-Path $env:SystemRoot "System32\tar.exe"
 
 if (-not [Environment]::Is64BitOperatingSystem) {
   throw "Windows x64 sidecar builds require a 64-bit operating system."
 }
 if (-not (Test-Path $Bash)) {
   throw "Cygwin bash was not found at $Bash. Set CYGWIN_ROOT to the Cygwin installation directory."
+}
+if (-not (Test-Path $Tar)) {
+  throw "Windows tar was not found at $Tar."
 }
 
 New-Item -ItemType Directory -Force -Path $BuildRoot, $Output, $LicenseOutput | Out-Null
@@ -43,7 +47,10 @@ if ($ActualHash -ne $IperfSha256) {
 if (Test-Path $Source) {
   Remove-Item -Recurse -Force $Source
 }
-tar -xzf $Archive -C $BuildRoot
+& $Tar -xzf $Archive -C $BuildRoot
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to extract the iperf source archive (exit code $LASTEXITCODE)."
+}
 
 $env:IPERF_SOURCE_WINDOWS = $Source
 $CygSource = (& $Bash -lc 'cygpath -u "$IPERF_SOURCE_WINDOWS"').Trim()

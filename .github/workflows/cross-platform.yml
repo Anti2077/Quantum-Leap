@@ -101,7 +101,7 @@ jobs:
       - name: Build and smoke-test iperf3 sidecar
         shell: pwsh
         run: |
-          npm run sidecar:windows
+          scripts/build-iperf-windows.ps1
           scripts/smoke-test-iperf-sidecar.ps1 -Binary src-tauri/binaries/iperf3-x86_64-pc-windows-msvc.exe
       - name: Rust tests with Credential Manager
         shell: pwsh
