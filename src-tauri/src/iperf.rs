@@ -11,7 +11,7 @@ use std::fs;
 use std::{
     env,
     io::{BufRead as _, BufReader as StdBufReader, Read as _},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Stdio,
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -196,7 +196,7 @@ fn resolve_iperf3_binary() -> Result<PathBuf, String> {
 
     candidates
         .into_iter()
-        .find(is_executable)
+        .find(|path| is_executable(path))
         .ok_or_else(|| "本机未找到 iperf3；请使用 Homebrew 安装，或设置 IPERF3_PATH".into())
 }
 
@@ -224,7 +224,7 @@ fn local_iperf_command(app: &AppHandle) -> Result<ShellCommand, String> {
     }
 }
 
-fn is_executable(path: &PathBuf) -> bool {
+fn is_executable(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
