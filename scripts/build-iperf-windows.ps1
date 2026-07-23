@@ -27,7 +27,15 @@ Get-ChildItem -Path $Output -Filter "*.dll" -File -ErrorAction SilentlyContinue 
 if (-not (Test-Path $Archive)) {
   Invoke-WebRequest -Uri $IperfUrl -OutFile $Archive
 }
-$ActualHash = (Get-FileHash -Algorithm SHA256 $Archive).Hash.ToLowerInvariant()
+$Sha256 = [System.Security.Cryptography.SHA256]::Create()
+$ArchiveStream = [System.IO.File]::OpenRead($Archive)
+try {
+  $ActualHash = ([System.BitConverter]::ToString($Sha256.ComputeHash($ArchiveStream))).Replace("-", "").ToLowerInvariant()
+}
+finally {
+  $ArchiveStream.Dispose()
+  $Sha256.Dispose()
+}
 if ($ActualHash -ne $IperfSha256) {
   throw "iperf source checksum mismatch: expected $IperfSha256, got $ActualHash"
 }

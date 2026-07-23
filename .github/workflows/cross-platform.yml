@@ -97,7 +97,6 @@ jobs:
       - name: Install Cygwin build dependencies
         uses: egor-tensin/setup-cygwin@v4
         with:
-          platform: x64
           packages: gcc-core make autoconf automake libtool
       - name: Build and smoke-test iperf3 sidecar
         shell: pwsh
