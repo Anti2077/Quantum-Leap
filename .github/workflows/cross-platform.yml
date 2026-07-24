@@ -95,7 +95,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential curl file libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
-            librsvg2-dev patchelf libdbus-1-dev dbus-x11 gnome-keyring
+            librsvg2-dev patchelf libdbus-1-dev dbus-x11 gnome-keyring xdg-utils
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
