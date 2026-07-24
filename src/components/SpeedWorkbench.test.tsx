@@ -87,6 +87,27 @@ describe("responsive workspace", () => {
     expect(separator.getAttribute("aria-valuenow")).toBe("50");
   });
 
+  it("expands connection advanced options without forcing the scroll position", async () => {
+    const user = userEvent.setup();
+    const scrollIntoView = vi.mocked(HTMLElement.prototype.scrollIntoView);
+    scrollIntoView.mockClear();
+    renderWorkbench();
+
+    await user.click(screen.getByRole("button", { name: "Advanced optionsAuto-detect" }));
+
+    expect(screen.getByText("Local client bind IP")).not.toBeNull();
+    expect(document.querySelector(".advanced-disclosure-motion")).not.toBeNull();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("provides descriptions for both test topologies", () => {
+    renderWorkbench();
+
+    expect(screen.getByLabelText("Test topology details")).not.toBeNull();
+    expect(screen.getByText("Run the iperf3 client on this Mac and test against the target server.")).not.toBeNull();
+    expect(screen.getByText("Connect to two remote devices over SSH, with device A testing against device B.")).not.toBeNull();
+  });
+
   it("uses the command bar and avoids layout persistence in compact mode", () => {
     mockCompactLayout(true);
     const getItem = vi.spyOn(localStorage, "getItem");

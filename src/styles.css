@@ -625,9 +625,10 @@ input:focus-visible {
   flex-direction: column;
   gap: 13px;
   margin-left: -5px;
+  margin-right: -10px;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 1px 8px 4px 6px;
+  padding: 1px 18px 4px 6px;
   scrollbar-width: thin;
   scrollbar-color: rgba(80, 137, 188, 0.22) transparent;
 }
@@ -965,6 +966,10 @@ h2 {
   height: 39px;
 }
 
+.topology-mode-label {
+  margin-bottom: 7px;
+}
+
 .topology-tabs > button {
   font-size: 10px;
 }
@@ -1207,6 +1212,12 @@ h2 {
 .advanced-disclosure-fields {
   display: grid;
   gap: 12px;
+}
+
+.advanced-disclosure-motion {
+  margin: -3px;
+  overflow: hidden;
+  padding: 3px;
 }
 
 .advanced-disclosure-toggle {

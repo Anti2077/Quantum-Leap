@@ -499,8 +499,6 @@ export function SpeedWorkbench() {
   const requestRef = useRef<SpeedTestRequest | null>(null);
   const appContentRef = useRef<HTMLElement>(null);
   const endpointEditorRef = useRef<HTMLElement>(null);
-  const clientAdvancedRef = useRef<HTMLDivElement>(null);
-  const serverAdvancedRef = useRef<HTMLDivElement>(null);
   const lastGoodSampleRef = useRef<Partial<Record<TransferDirection, SpeedSample>>>({});
   const previousLanguageRef = useRef(language);
 
@@ -660,16 +658,6 @@ export function SpeedWorkbench() {
     });
     return () => cancelAnimationFrame(frame);
   }, [compactLayout, connectionOpen, endpointEditor]);
-
-  useEffect(() => {
-    if (advancedPreview) return;
-    if ((compactLayout && !connectionOpen) || (!clientAdvancedOpen && !serverAdvancedOpen)) return;
-    const frame = requestAnimationFrame(() => {
-      const target = clientAdvancedOpen ? clientAdvancedRef.current : serverAdvancedRef.current;
-      target?.scrollIntoView({ block: "nearest" });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [advancedPreview, clientAdvancedOpen, compactLayout, connectionOpen, serverAdvancedOpen]);
 
   useEffect(() => {
     if (previousLanguageRef.current === language) return;
@@ -1283,6 +1271,18 @@ export function SpeedWorkbench() {
 
               <form id={CONNECTION_FORM_ID} onSubmit={submit} className="connection-form">
                 <div className="connection-fixed-top-controls">
+                  <div className="server-mode-label topology-mode-label">
+                    <span className="field-label">{t("topology")}</span>
+                    <span className="mode-help" tabIndex={0} aria-label={t("topologyHelp")}>
+                      <CircleAlert size={14} aria-hidden="true" />
+                      <span className="mode-tooltip" role="tooltip">
+                        <strong>{t("localTest")}</strong>
+                        <span>{t("localTestHelp")}</span>
+                        <strong>{t("remoteTest")}</strong>
+                        <span>{t("remoteTestHelp")}</span>
+                      </span>
+                    </span>
+                  </div>
                   <div className="test-mode-tabs topology-tabs" aria-label={t("topology")}>
                     <button
                       type="button"
@@ -1485,8 +1485,16 @@ export function SpeedWorkbench() {
                             <ChevronDown size={14} aria-hidden="true" />
                           </span>
                         </button>
+                        <AnimatePresence initial={false}>
                         {clientAdvancedOpen && (
-                          <div ref={clientAdvancedRef} className="advanced-disclosure-fields">
+                          <motion.div
+                            className="advanced-disclosure-motion"
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ height: { duration: 0.28, ease: [0.22, 1, 0.36, 1] }, opacity: { duration: 0.18 } }}
+                          >
+                          <div className="advanced-disclosure-fields">
                             <label>
                               <FieldLabel icon={<Network size={13} />}>{t("clientBindIp")}</FieldLabel>
                               <input
@@ -1520,7 +1528,9 @@ export function SpeedWorkbench() {
                               </span>
                             </label>
                           </div>
+                          </motion.div>
                         )}
+                        </AnimatePresence>
                       </div>
                     </motion.section>
                   )}
@@ -1727,8 +1737,16 @@ export function SpeedWorkbench() {
                         <ChevronDown size={14} aria-hidden="true" />
                       </span>
                     </button>
+                    <AnimatePresence initial={false}>
                     {serverAdvancedOpen && (
-                      <div ref={serverAdvancedRef} className="advanced-disclosure-fields">
+                      <motion.div
+                        className="advanced-disclosure-motion"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ height: { duration: 0.28, ease: [0.22, 1, 0.36, 1] }, opacity: { duration: 0.18 } }}
+                      >
+                      <div className="advanced-disclosure-fields">
                         {!remoteToRemote && (
                           <label>
                             <FieldLabel icon={<Network size={13} />}>{t("localBindIp")}</FieldLabel>
@@ -1784,7 +1802,9 @@ export function SpeedWorkbench() {
                           </span>
                         </label>
                       </div>
+                      </motion.div>
                     )}
+                    </AnimatePresence>
                   </div>
                 </>
               ) : (
@@ -1816,8 +1836,16 @@ export function SpeedWorkbench() {
                           <ChevronDown size={14} aria-hidden="true" />
                         </span>
                       </button>
+                      <AnimatePresence initial={false}>
                       {serverAdvancedOpen && (
-                        <div ref={serverAdvancedRef} className="advanced-disclosure-fields">
+                        <motion.div
+                          className="advanced-disclosure-motion"
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ height: { duration: 0.28, ease: [0.22, 1, 0.36, 1] }, opacity: { duration: 0.18 } }}
+                        >
+                        <div className="advanced-disclosure-fields">
                           <label>
                             <FieldLabel icon={<Network size={13} />}>{t("localBindIp")}</FieldLabel>
                             <input
@@ -1835,7 +1863,9 @@ export function SpeedWorkbench() {
                             </span>
                           </label>
                         </div>
+                        </motion.div>
                       )}
+                      </AnimatePresence>
                     </div>
                   )}
                 </>
