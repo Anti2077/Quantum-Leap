@@ -75,6 +75,8 @@ The public macOS build is ad-hoc signed and is not notarized with Apple Develope
 
 Windows NSIS, Linux AppImage, and Linux DEB packages are published as unsigned Release assets. Windows may show a SmartScreen warning; verify downloads against the attached SHA-256 manifest before installing.
 
+The cross-platform build workflow also produces unsigned Linux ARM64 AppImage and DEB artifacts for pull requests, `main` pushes, and manual runs. Actions artifacts are retained for 14 days and are not GitHub Release assets.
+
 ## Requirements
 
 - macOS 13 Ventura or later, Windows 10/11 x64, or an x64 Ubuntu/Debian desktop using glibc
@@ -104,7 +106,7 @@ npm install
 npm run tauri:dev
 ```
 
-Before packaging on Linux or Windows, run `npm run sidecar:linux` or `npm run sidecar:windows`. The Windows sidecar build requires Cygwin with GCC, make, autoconf, automake, and curl. Generated binaries and DLLs are stored in the ignored `src-tauri/binaries/` directory.
+Before packaging on Linux or Windows, run `npm run sidecar:linux` or `npm run sidecar:windows`. The Linux script builds the sidecar for the native x64 or ARM64 host. The Windows sidecar build requires Cygwin with GCC, make, autoconf, automake, and curl. Generated binaries and DLLs are stored in the ignored `src-tauri/binaries/` directory.
 
 Validation commands:
 

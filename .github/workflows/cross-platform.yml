@@ -77,6 +77,72 @@ jobs:
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/SHA256SUMS-linux-x64.txt
 
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl file libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libdbus-1-dev dbus-x11 gnome-keyring
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Build and smoke-test iperf3 sidecar
+        run: |
+          npm run sidecar:linux
+          scripts/smoke-test-iperf-sidecar.sh src-tauri/binaries/iperf3-aarch64-unknown-linux-gnu
+          file src-tauri/binaries/iperf3-aarch64-unknown-linux-gnu | grep -F 'ARM aarch64'
+      - name: Rust tests with Secret Service
+        run: |
+          dbus-run-session -- bash -c '
+            eval "$(printf "\n" | gnome-keyring-daemon --unlock --components=secrets)"
+            export QUANTUM_LEAP_CREDENTIAL_TEST=1
+            cargo test --manifest-path src-tauri/Cargo.toml --locked
+          '
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked -- -D warnings
+      - name: Build AppImage and DEB
+        run: npm run tauri:build -- --bundles appimage,deb
+      - name: Inspect Linux packages
+        run: |
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' -print -quit)
+          DEB=$(find src-tauri/target/release/bundle/deb -name '*.deb' -print -quit)
+          chmod +x "$APPIMAGE"
+          file "$APPIMAGE" | grep -F 'ARM aarch64'
+          test "$(dpkg-deb --field "$DEB" Architecture)" = "arm64"
+          (cd /tmp && "$GITHUB_WORKSPACE/$APPIMAGE" --appimage-extract >/dev/null)
+          find /tmp/squashfs-root -type f | grep -E '/iperf3$'
+          find /tmp/squashfs-root -type f | grep -E 'third-party/iperf3-LICENSE$'
+          find /tmp/squashfs-root -type f | grep -E '/LICENSE$'
+          find /tmp/squashfs-root -type f | grep -E '/THIRD_PARTY_NOTICES.md$'
+          file "$(find /tmp/squashfs-root -type f -name iperf3 -print -quit)" | grep -F 'ARM aarch64'
+          dpkg-deb --contents "$DEB" | grep -E '/iperf3$'
+          dpkg-deb --contents "$DEB" | grep -E 'third-party/iperf3-LICENSE$'
+          dpkg-deb --contents "$DEB" | grep -E '/LICENSE$'
+          dpkg-deb --contents "$DEB" | grep -E '/THIRD_PARTY_NOTICES.md$'
+          sha256sum "$APPIMAGE" "$DEB" > src-tauri/target/release/bundle/SHA256SUMS-linux-arm64.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quantum-leap-linux-arm64-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/SHA256SUMS-linux-arm64.txt
+
   windows-x64:
     runs-on: windows-2022
     timeout-minutes: 60
