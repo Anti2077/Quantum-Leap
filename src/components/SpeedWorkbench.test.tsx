@@ -196,3 +196,29 @@ describe("saved server popover", () => {
     expect(document.activeElement).toBe(trigger);
   });
 });
+
+describe("link health result", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.documentElement.dataset.colorTheme = "dark";
+    mockCompactLayout(false);
+    window.history.replaceState({}, "", "/?designPreview=crystal&resultPreview=1");
+  });
+
+  it("opens protocol-specific diagnostics from the completed result", async () => {
+    const user = userEvent.setup();
+    renderWorkbench();
+
+    const trigger = screen.getByRole("button", { name: "Link diagnostics" });
+    expect(trigger.textContent).toContain("Link health");
+    await user.click(trigger);
+
+    expect(screen.getByRole("dialog", { name: "Link diagnostics" })).not.toBeNull();
+    expect(screen.getByText("TCP retransmission")).not.toBeNull();
+    expect(screen.getByText("Transfer stability")).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Close link diagnostics" }));
+    expect(screen.queryByRole("dialog", { name: "Link diagnostics" })).toBeNull();
+    window.history.replaceState({}, "", "/");
+  });
+});

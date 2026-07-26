@@ -1,6 +1,6 @@
 use crate::model::{
-    RemoteTarget, ServerMode, SpeedSampleEvent, SpeedTestRequest, TransferDirection,
-    TransportProtocol,
+    RemoteTarget, ServerMode, SpeedSampleEvent, SpeedSummaryEvent, SpeedTestRequest,
+    TransferDirection, TransportProtocol,
 };
 use crate::ssh::{
     connect, parse_remote_iperf_error, remote_client_command, SshError, CLIENT_PID_MARKER,
@@ -45,6 +45,9 @@ enum LocalIperfSource {
 struct PingMetrics {
     latency_ms: Option<f64>,
     jitter_ms: Option<f64>,
+    baseline_samples: Vec<f64>,
+    baseline_latency_ms: Option<f64>,
+    load_started: bool,
     updated_at: Option<Instant>,
 }
 
@@ -88,6 +91,31 @@ impl PingMetrics {
         self.updated_at
             .filter(|updated| updated.elapsed() <= Duration::from_secs(2))
             .and_then(|_| self.latency_ms.map(|latency| (latency, self.jitter_ms)))
+    }
+
+    fn record(&mut self, latency_ms: f64) {
+        self.jitter_ms = self
+            .latency_ms
+            .map(|previous| (latency_ms - previous).abs());
+        self.latency_ms = Some(latency_ms);
+        self.updated_at = Some(Instant::now());
+        if !self.load_started {
+            self.baseline_samples.push(latency_ms);
+        }
+    }
+
+    fn begin_load(&mut self) {
+        self.load_started = true;
+        if self.baseline_samples.is_empty() {
+            return;
+        }
+        self.baseline_samples.sort_by(f64::total_cmp);
+        let middle = self.baseline_samples.len() / 2;
+        self.baseline_latency_ms = Some(if self.baseline_samples.len().is_multiple_of(2) {
+            (self.baseline_samples[middle - 1] + self.baseline_samples[middle]) / 2.0
+        } else {
+            self.baseline_samples[middle]
+        });
     }
 }
 
@@ -320,15 +348,21 @@ fn spawn_ping(host: &str, metrics: Arc<Mutex<PingMetrics>>) -> Option<(Child, Jo
                 continue;
             };
             let mut current = metrics.lock().await;
-            current.jitter_ms = current
-                .latency_ms
-                .map(|previous| (latency_ms - previous).abs());
-            current.latency_ms = Some(latency_ms);
-            current.updated_at = Some(Instant::now());
+            current.record(latency_ms);
             line.clear();
         }
     });
     Some((child, task))
+}
+
+async fn finish_ping_baseline(metrics: &Arc<Mutex<PingMetrics>>) {
+    for _ in 0..24 {
+        if metrics.lock().await.baseline_samples.len() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    metrics.lock().await.begin_load();
 }
 
 async fn stop_ping(process: &mut Option<(Child, JoinHandle<()>)>) {
@@ -406,17 +440,24 @@ async fn process_local_output_line(
     parallel_streams: u8,
 ) {
     let line = String::from_utf8_lossy(line);
-    if let Some(mut sample) = parse_sample(&line, direction)
+    if let Some(summary) = parse_summary(&line, direction, protocol)
+        .or_else(|| parse_text_summary(&line, direction, protocol, parallel_streams))
+    {
+        let _ = app.emit("speed://summary", summary);
+    } else if let Some(mut sample) = parse_sample(&line, direction)
         .or_else(|| parse_text_sample(&line, direction, parallel_streams))
     {
+        let ping = ping_metrics.lock().await;
+        sample.baseline_latency_ms = ping.baseline_latency_ms;
         if sample.latency_ms.is_none() {
-            if let Some((latency_ms, jitter_ms)) = ping_metrics.lock().await.fresh_values() {
+            if let Some((latency_ms, jitter_ms)) = ping.fresh_values() {
                 sample.latency_ms = Some(latency_ms);
                 if protocol == TransportProtocol::Tcp && sample.jitter_ms.is_none() {
                     sample.jitter_ms = jitter_ms;
                 }
             }
         }
+        drop(ping);
         add_tcp_latency_jitter(&mut sample, previous_latency_ms);
         output.sample_count += 1;
         let _ = app.emit("speed://sample", sample);
@@ -449,13 +490,22 @@ pub async fn run_local_client(
         ))
         .set_raw_out(true);
 
-    let (mut events, child) = command
-        .spawn()
-        .map_err(|err| RunError::Message(format!("启动本地 iperf3 失败：{err}")))?;
-    let mut child = Some(child);
-
     let ping_metrics = Arc::new(Mutex::new(PingMetrics::default()));
     let mut ping_process = spawn_ping(request.target_host(), ping_metrics.clone());
+    if ping_process.is_some() {
+        finish_ping_baseline(&ping_metrics).await;
+    } else {
+        ping_metrics.lock().await.begin_load();
+    }
+
+    let (mut events, child) = match command.spawn() {
+        Ok(process) => process,
+        Err(error) => {
+            stop_ping(&mut ping_process).await;
+            return Err(RunError::Message(format!("启动本地 iperf3 失败：{error}")));
+        }
+    };
+    let mut child = Some(child);
 
     let mut stdout = LineBuffer::default();
     let mut stderr = Vec::new();
@@ -631,7 +681,11 @@ fn run_remote_client_blocking(
                 }
                 continue;
             }
-            if let Some(mut sample) = parse_sample(line, direction)
+            if let Some(summary) = parse_summary(line, direction, protocol)
+                .or_else(|| parse_text_summary(line, direction, protocol, parallel_streams))
+            {
+                let _ = app.emit("speed://summary", summary);
+            } else if let Some(mut sample) = parse_sample(line, direction)
                 .or_else(|| parse_text_sample(line, direction, parallel_streams))
             {
                 add_tcp_latency_jitter(&mut sample, &mut previous_latency_ms);
@@ -798,6 +852,17 @@ pub fn parse_sample(line: &str, direction: TransferDirection) -> Option<SpeedSam
         })
         .or(reported_bandwidth)?;
     let retransmits = summary.get("retransmits").and_then(Value::as_u64);
+    let packets = summary.get("packets").and_then(Value::as_u64);
+    let lost_packets = summary.get("lost_packets").and_then(Value::as_u64);
+    let loss_percent = summary
+        .get("lost_percent")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .or_else(|| {
+            let packets = packets?;
+            let lost_packets = lost_packets?;
+            (packets > 0).then_some(lost_packets as f64 * 100.0 / packets as f64)
+        });
     let jitter_ms = summary
         .get("jitter_ms")
         .and_then(Value::as_f64)
@@ -810,7 +875,8 @@ pub fn parse_sample(line: &str, direction: TransferDirection) -> Option<SpeedSam
                 .filter_map(|stream| stream.get("rttvar").and_then(Value::as_f64))
                 .filter(|value| value.is_finite() && *value > 0.0)
                 .collect();
-            (!samples.is_empty()).then(|| samples.iter().sum::<f64>() / samples.len() as f64)
+            (!samples.is_empty())
+                .then(|| samples.iter().sum::<f64>() / samples.len() as f64 / 1_000.0)
         });
     let latency_ms = interval
         .get("streams")
@@ -821,7 +887,8 @@ pub fn parse_sample(line: &str, direction: TransferDirection) -> Option<SpeedSam
                 .filter_map(|stream| stream.get("rtt").and_then(Value::as_f64))
                 .filter(|value| value.is_finite() && *value > 0.0)
                 .collect();
-            (!samples.is_empty()).then(|| samples.iter().sum::<f64>() / samples.len() as f64)
+            (!samples.is_empty())
+                .then(|| samples.iter().sum::<f64>() / samples.len() as f64 / 1_000.0)
         })
         .or_else(|| {
             summary
@@ -829,6 +896,7 @@ pub fn parse_sample(line: &str, direction: TransferDirection) -> Option<SpeedSam
                 .or_else(|| summary.get("rtt"))
                 .and_then(Value::as_f64)
                 .filter(|milliseconds| milliseconds.is_finite() && *milliseconds > 0.0)
+                .map(|microseconds| microseconds / 1_000.0)
         });
 
     Some(SpeedSampleEvent {
@@ -836,8 +904,92 @@ pub fn parse_sample(line: &str, direction: TransferDirection) -> Option<SpeedSam
         bandwidth_bps,
         bytes,
         latency_ms,
+        baseline_latency_ms: None,
         jitter_ms,
         retransmits,
+        packets,
+        lost_packets,
+        loss_percent,
+        omitted: summary
+            .get("omitted")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        direction,
+    })
+}
+
+fn first_u64(values: &[&Value], key: &str) -> Option<u64> {
+    values
+        .iter()
+        .find_map(|value| value.get(key).and_then(Value::as_u64))
+}
+
+fn first_f64(values: &[&Value], key: &str) -> Option<f64> {
+    values.iter().find_map(|value| {
+        value
+            .get(key)
+            .and_then(Value::as_f64)
+            .filter(|number| number.is_finite())
+    })
+}
+
+pub fn parse_summary(
+    line: &str,
+    direction: TransferDirection,
+    protocol: TransportProtocol,
+) -> Option<SpeedSummaryEvent> {
+    let root = serde_json::from_str::<Value>(line).ok()?;
+    if root.get("event").and_then(Value::as_str) != Some("end") {
+        return None;
+    }
+
+    let data = root.get("data").unwrap_or(&root);
+    let end = data.get("end").unwrap_or(data);
+    let mut values = Vec::new();
+    for key in ["sum", "sum_received", "sum_sent"] {
+        if let Some(value) = end.get(key) {
+            values.push(value);
+        }
+    }
+    if let Some(streams) = end.get("streams").and_then(Value::as_array) {
+        let stream_key = if protocol == TransportProtocol::Udp {
+            "udp"
+        } else {
+            "sender"
+        };
+        values.extend(streams.iter().filter_map(|stream| stream.get(stream_key)));
+    }
+    if values.is_empty() {
+        return None;
+    }
+
+    let bytes = first_u64(&values, "bytes").unwrap_or_default();
+    let seconds = first_f64(&values, "seconds").unwrap_or_default();
+    let packets = first_u64(&values, "packets");
+    let lost_packets = first_u64(&values, "lost_packets");
+    let loss_percent = first_f64(&values, "lost_percent")
+        .filter(|value| *value >= 0.0)
+        .or_else(|| {
+            let packets = packets?;
+            let lost_packets = lost_packets?;
+            (packets > 0).then_some(lost_packets as f64 * 100.0 / packets as f64)
+        });
+
+    Some(SpeedSummaryEvent {
+        seconds,
+        bandwidth_bps: first_f64(&values, "bits_per_second").unwrap_or_else(|| {
+            if seconds > 0.0 {
+                bytes as f64 * 8.0 / seconds
+            } else {
+                0.0
+            }
+        }),
+        bytes,
+        jitter_ms: first_f64(&values, "jitter_ms").filter(|value| *value >= 0.0),
+        retransmits: first_u64(&values, "retransmits"),
+        packets,
+        lost_packets,
+        loss_percent,
         direction,
     })
 }
@@ -917,14 +1069,70 @@ fn parse_text_sample(
         .position(|token| *token == "sender" || *token == "receiver")
         .and_then(|index| index.checked_sub(1))
         .and_then(|index| tokens.get(index)?.parse::<u64>().ok());
+    let packet_counts = tokens.iter().find_map(|token| {
+        let (lost, total) = token.split_once('/')?;
+        Some((lost.parse::<u64>().ok()?, total.parse::<u64>().ok()?))
+    });
+    let (lost_packets, packets) = packet_counts
+        .map(|(lost, total)| (Some(lost), Some(total)))
+        .unwrap_or((None, None));
+    let loss_percent = tokens
+        .iter()
+        .find_map(|token| {
+            token
+                .strip_prefix('(')
+                .and_then(|value| value.strip_suffix("%)"))
+                .and_then(|value| value.parse::<f64>().ok())
+        })
+        .or_else(|| {
+            let lost = lost_packets?;
+            let total = packets?;
+            (total > 0).then_some(lost as f64 * 100.0 / total as f64)
+        });
 
     Some(SpeedSampleEvent {
         elapsed,
         bandwidth_bps: bandwidth,
         bytes,
         latency_ms: None,
+        baseline_latency_ms: None,
         jitter_ms,
         retransmits,
+        packets,
+        lost_packets,
+        loss_percent,
+        omitted: line.to_ascii_lowercase().contains("omitted"),
+        direction,
+    })
+}
+
+fn parse_text_summary(
+    line: &str,
+    direction: TransferDirection,
+    protocol: TransportProtocol,
+    parallel_streams: u8,
+) -> Option<SpeedSummaryEvent> {
+    let expected_marker = if protocol == TransportProtocol::Tcp {
+        "sender"
+    } else {
+        "receiver"
+    };
+    if !line
+        .split_whitespace()
+        .any(|token| token == expected_marker)
+    {
+        return None;
+    }
+    let sample = parse_text_sample(line, direction, parallel_streams)?;
+    Some(SpeedSummaryEvent {
+        seconds: sample.elapsed,
+        bandwidth_bps: sample.bandwidth_bps,
+        bytes: sample.bytes,
+        jitter_ms: sample.jitter_ms,
+        retransmits: sample.retransmits,
+        packets: sample.packets,
+        lost_packets: sample.lost_packets,
+        loss_percent: sample.loss_percent,
         direction,
     })
 }
@@ -963,7 +1171,7 @@ mod tests {
 
     #[test]
     fn parses_json_stream_interval() {
-        let line = r#"{"event":"interval","data":{"streams":[{"end":1.001,"rtt":13,"rttvar":7}],"sum":{"end":1.001,"seconds":1.001,"bytes":125000000,"bits_per_second":998500000.0,"retransmits":2,"sender":true}}}"#;
+        let line = r#"{"event":"interval","data":{"streams":[{"end":1.001,"rtt":13000,"rttvar":7000}],"sum":{"end":1.001,"seconds":1.001,"bytes":125000000,"bits_per_second":998500000.0,"retransmits":2,"sender":true}}}"#;
         let sample = parse_sample(line, TransferDirection::Upload).expect("interval sample");
 
         assert_eq!(sample.elapsed, 1.001);
@@ -988,7 +1196,7 @@ mod tests {
 
     #[test]
     fn parses_legacy_udp_interval_output() {
-        let line = "[SUM]   0.00-1.00   sec  119 MBytes  998 Mbits/sec  0.021 ms  0/0 (0%)";
+        let line = "[SUM]   0.00-1.00   sec  119 MBytes  998 Mbits/sec  0.021 ms  2/1000 (0.2%)";
         let sample =
             parse_text_sample(line, TransferDirection::Download, 8).expect("legacy UDP interval");
 
@@ -997,6 +1205,21 @@ mod tests {
         assert_eq!(sample.bandwidth_bps, 998_000_000.0);
         assert_eq!(sample.jitter_ms, Some(0.021));
         assert_eq!(sample.retransmits, None);
+        assert_eq!(sample.lost_packets, Some(2));
+        assert_eq!(sample.packets, Some(1_000));
+        assert_eq!(sample.loss_percent, Some(0.2));
+    }
+
+    #[test]
+    fn parses_udp_json_stream_summary() {
+        let line = r#"{"event":"end","data":{"sum":{"seconds":10.0,"bytes":125000000,"bits_per_second":100000000.0,"jitter_ms":1.25,"lost_packets":12,"packets":10000,"lost_percent":0.12}}}"#;
+        let summary = parse_summary(line, TransferDirection::Upload, TransportProtocol::Udp)
+            .expect("UDP summary");
+
+        assert_eq!(summary.jitter_ms, Some(1.25));
+        assert_eq!(summary.lost_packets, Some(12));
+        assert_eq!(summary.packets, Some(10_000));
+        assert_eq!(summary.loss_percent, Some(0.12));
     }
 
     #[test]
@@ -1111,8 +1334,13 @@ mod tests {
             bandwidth_bps: 1.0,
             bytes: 1,
             latency_ms: Some(3.2),
+            baseline_latency_ms: Some(1.0),
             jitter_ms: None,
             retransmits: None,
+            packets: None,
+            lost_packets: None,
+            loss_percent: None,
+            omitted: false,
             direction: TransferDirection::Upload,
         };
         let mut second = SpeedSampleEvent {
@@ -1141,14 +1369,20 @@ mod tests {
             bandwidth_bps: 42.0,
             bytes: 7,
             latency_ms: Some(1.2),
+            baseline_latency_ms: Some(0.8),
             jitter_ms: None,
             retransmits: None,
+            packets: None,
+            lost_packets: None,
+            loss_percent: None,
+            omitted: false,
             direction: TransferDirection::Upload,
         };
         let value = serde_json::to_value(sample).expect("serialize event");
 
         assert_eq!(value["bandwidthBps"], 42.0);
         assert_eq!(value["latencyMs"], 1.2);
+        assert_eq!(value["baselineLatencyMs"], 0.8);
         assert!(value.get("bandwidth_bps").is_none());
     }
 

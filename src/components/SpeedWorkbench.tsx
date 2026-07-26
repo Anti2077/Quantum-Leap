@@ -27,6 +27,7 @@ import Radio from "lucide-react/dist/esm/icons/radio.js";
 import Server from "lucide-react/dist/esm/icons/server.js";
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.js";
 import ShieldAlert from "lucide-react/dist/esm/icons/shield-alert.js";
+import ShieldCheck from "lucide-react/dist/esm/icons/shield-check.js";
 import Info from "lucide-react/dist/esm/icons/info.js";
 import Square from "lucide-react/dist/esm/icons/square.js";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
@@ -60,12 +61,19 @@ import {
   type BandwidthUnit
 } from "../lib/format";
 import { useI18n, type TranslationKey } from "../lib/i18n";
-import { downloadRating } from "../lib/speed-rating";
+import {
+  analyzeLinkHealth,
+  type HealthMetric,
+  type HealthMetricKey,
+  type HealthReport,
+  type HealthSample
+} from "../lib/link-health";
 import type {
   SavedServer,
   SpeedPromptEvent,
   SpeedSample,
   SpeedStateEvent,
+  SpeedSummary,
   SpeedTestRequest,
   ServerMode,
   SshAuthMethod,
@@ -116,13 +124,8 @@ interface RemoteClientForm {
   passphrase: string;
 }
 
-interface SamplePoint {
+interface SamplePoint extends HealthSample {
   t: number;
-  bps: number;
-  bytes: number;
-  retransmits: number;
-  latencyMs: number | null;
-  jitterMs: number | null;
   direction: TransferDirection;
 }
 
@@ -200,7 +203,12 @@ function designPreviewSamples(): SamplePoint[] {
         bytes: Math.round((bps * 0.5) / 8),
         retransmits: direction === "upload" && index % 11 === 0 ? 1 : 0,
         latencyMs: 12 + Math.sin(index * 0.42 + phase) * 2,
+        baselineLatencyMs: 5,
         jitterMs: 3 + Math.cos(index * 0.37 + phase) * 0.8,
+        packets: null,
+        lostPackets: null,
+        lossPercent: null,
+        omitted: false,
         direction
       };
     });
@@ -382,9 +390,66 @@ function summarize(samples: SamplePoint[], direction?: TransferDirection) {
   };
 }
 
+const healthMetricLabelKeys: Record<HealthMetricKey, TranslationKey> = {
+  retransmission: "healthRetransmission",
+  packetLoss: "healthPacketLoss",
+  loadedLatency: "healthLoadedLatency",
+  latencyStability: "healthLatencyStability",
+  udpJitter: "healthUdpJitter",
+  transferStability: "healthTransferStability"
+};
+
+const healthLevelKeys: Record<HealthReport["level"], TranslationKey> = {
+  healthy: "healthHealthy",
+  good: "healthGood",
+  attention: "healthAttention",
+  poor: "healthPoor",
+  unknown: "healthUnknown"
+};
+
+const healthMetricLevelKeys: Record<HealthMetric["level"], TranslationKey> = {
+  good: "healthMetricGood",
+  attention: "healthMetricAttention",
+  poor: "healthMetricPoor",
+  unknown: "healthMetricUnknown"
+};
+
+const healthConfidenceKeys: Record<HealthReport["confidence"], TranslationKey> = {
+  full: "healthConfidenceFull",
+  partial: "healthConfidencePartial",
+  insufficient: "healthConfidenceInsufficient"
+};
+
+function healthMetricValue(
+  metric: HealthMetric,
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string,
+  formatNumber: (value: number) => string
+) {
+  if (metric.primaryValue == null) return t("healthMetricUnknown");
+  const primary = formatNumber(Number(metric.primaryValue.toFixed(2)));
+  const secondary = formatNumber(Number((metric.secondaryValue ?? 0).toFixed(2)));
+  switch (metric.key) {
+    case "retransmission":
+      return t("healthRetransmissionValue", { density: primary, affected: secondary });
+    case "packetLoss":
+      return t("healthPacketLossValue", { loss: primary, lost: formatNumber(metric.secondaryValue ?? 0) });
+    case "loadedLatency":
+      return t("healthLoadedLatencyValue", { increase: primary, baseline: secondary });
+    case "latencyStability":
+      return t("healthLatencyStabilityValue", { spread: primary, median: secondary });
+    case "udpJitter":
+      return t("healthUdpJitterValue", { jitter: primary });
+    case "transferStability":
+      return t("healthTransferStabilityValue", { ratio: primary });
+  }
+}
+
 export function SpeedWorkbench() {
   const { language, t, formatNumber } = useI18n();
-  const previewParameters = import.meta.env.DEV ? new URLSearchParams(window.location.search) : null;
+  const previewHost = window.location.hostname;
+  const previewParameters = import.meta.env.DEV || previewHost === "localhost" || previewHost === "127.0.0.1"
+    ? new URLSearchParams(window.location.search)
+    : null;
   const animationPreviewDirection = previewParameters?.get("animationPreview") ?? null;
   const requestedDesignTheme = previewParameters?.get("designPreview") ?? null;
   const designPreviewTheme: DesignPreviewTheme | null =
@@ -433,6 +498,7 @@ export function SpeedWorkbench() {
   const [samples, setSamples] = useState<SamplePoint[]>(() =>
     designPreviewTheme ? designPreviewSamples() : []
   );
+  const [summaries, setSummaries] = useState<Partial<Record<TransferDirection, SpeedSummary>>>({});
   const [latest, setLatest] = useState<SpeedSample | null>(null);
   const [prompt, setPrompt] = useState<SpeedPromptEvent | null>(() =>
     promptPreview === "existingServer"
@@ -476,6 +542,7 @@ export function SpeedWorkbench() {
   );
   const [savedMenuOpen, setSavedMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [healthOpen, setHealthOpen] = useState(false);
   const [savedNoteEditorOpen, setSavedNoteEditorOpen] = useState(false);
   const [savedNoteDraft, setSavedNoteDraft] = useState("");
   const [savedBusy, setSavedBusy] = useState(false);
@@ -558,11 +625,11 @@ export function SpeedWorkbench() {
           lastGoodSampleRef.current[sample.direction] ??
           lastGoodSampleRef.current[sample.direction === "upload" ? "download" : "upload"];
         setLatest(held ? { ...sample, bandwidthBps: held.bandwidthBps } : sample);
-        return;
+      } else {
+        lastGoodSampleRef.current[sample.direction] = sample;
+        setLatest(sample);
       }
 
-      lastGoodSampleRef.current[sample.direction] = sample;
-      setLatest(sample);
       setSamples((current) => [
         ...current.slice(-(SAMPLE_HISTORY_LIMIT - 1)),
         {
@@ -571,10 +638,26 @@ export function SpeedWorkbench() {
           bytes: sample.bytes,
           retransmits: sample.retransmits ?? 0,
           latencyMs: sample.latencyMs ?? null,
+          baselineLatencyMs: sample.baselineLatencyMs ?? null,
           jitterMs: sample.jitterMs ?? null,
+          packets: sample.packets ?? null,
+          lostPackets: sample.lostPackets ?? null,
+          lossPercent: sample.lossPercent ?? null,
+          omitted: sample.omitted ?? false,
           direction: sample.direction
         }
       ]);
+    })
+      .then((unlisten) => {
+        if (mounted) unlisteners.push(unlisten);
+        else unlisten();
+      })
+      .catch(() => undefined);
+
+    void listen<SpeedSummary>("speed://summary", (event) => {
+      if (!mounted) return;
+      const summary = event.payload;
+      setSummaries((current) => ({ ...current, [summary.direction]: summary }));
     })
       .then((unlisten) => {
         if (mounted) unlisteners.push(unlisten);
@@ -721,11 +804,21 @@ export function SpeedWorkbench() {
   const overallStats = useMemo(() => summarize(samples), [samples]);
   const activeStats = activeDirection === "upload" ? uploadStats : downloadStats;
   const totalBytes = uploadStats.bytes + downloadStats.bytes;
-  const displayedRetransmits = standard ? overallStats.retransmits : activeStats.retransmits;
-  const retransmitWarning = protocol === "tcp" && status.phase === "completed" && displayedRetransmits >= 100;
-  const displayedStatusMessage = retransmitWarning
-    ? t("retransmitWarning", { count: formatNumber(displayedRetransmits) })
-    : status.message;
+  const summaryValues = useMemo(
+    () => Object.values(summaries).filter((summary): summary is SpeedSummary => summary != null),
+    [summaries]
+  );
+  const healthReport = useMemo(
+    () => analyzeLinkHealth(protocol, samples, summaryValues),
+    [protocol, samples, summaryValues]
+  );
+  const healthWarning = status.phase === "completed" && ["attention", "poor"].includes(healthReport.level);
+  const packetLossPercent = healthReport.metrics.find((metric) => metric.key === "packetLoss")?.primaryValue ?? null;
+  const metricNeedsAttention = (key: HealthMetricKey) => {
+    const level = healthReport.metrics.find((metric) => metric.key === key)?.level;
+    return level === "attention" || level === "poor";
+  };
+  const displayedStatusMessage = status.message;
   const displayedBps = designPreviewTheme
     ? resultPreview
       ? downloadStats.average
@@ -739,7 +832,6 @@ export function SpeedWorkbench() {
     () => formatBandwidthParts(displayedBps, bandwidthUnit),
     [bandwidthUnit, displayedBps]
   );
-  const rating = downloadRating(downloadStats.average);
   const motionIntensity = Math.min(1, Math.max(0, displayedBps / 1e9));
   const elapsed = Math.min(duration, Math.max(0, latest?.elapsed ?? 0));
   const completedDuration = standard && latest?.direction === "download" ? duration : 0;
@@ -1026,7 +1118,9 @@ export function SpeedWorkbench() {
     };
 
     setSamples([]);
+    setSummaries({});
     setLatest(null);
+    setHealthOpen(false);
     lastGoodSampleRef.current = {};
     setPrompt(null);
     setConnectionOpen(false);
@@ -1084,7 +1178,8 @@ export function SpeedWorkbench() {
   };
 
   return (
-    <div className="app-frame">
+    <Dialog.Root open={healthOpen} onOpenChange={setHealthOpen}>
+      <div className="app-frame">
       <div className="ambient-plane ambient-plane-top" />
       <div className="ambient-plane ambient-plane-bottom" />
 
@@ -2107,15 +2202,25 @@ export function SpeedWorkbench() {
                       <span>Port {form.iperfPort}</span>
                     </div>
                   </div>
-                  {completedStandard ? (
-                    <motion.span
-                      className={`speed-rating rating-${rating.key}`}
-                      initial={{ opacity: 0, scale: 0.86 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ type: "spring", stiffness: 260, damping: 20 }}
-                    >
-                      {t("downloadRating")} · <strong>{t(rating.labelKey)}</strong>
-                    </motion.span>
+                  {status.phase === "completed" ? (
+                    <Dialog.Trigger asChild>
+                      <motion.button
+                        type="button"
+                        className={`health-summary-trigger health-${healthReport.level}`}
+                        initial={{ opacity: 0, scale: 0.86 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ type: "spring", stiffness: 260, damping: 20 }}
+                        aria-label={t("healthDiagnostics")}
+                      >
+                        {healthReport.level === "healthy" || healthReport.level === "good" ? (
+                          <ShieldCheck size={15} aria-hidden="true" />
+                        ) : (
+                          <ShieldAlert size={15} aria-hidden="true" />
+                        )}
+                        <span>{t("healthScore")}</span>
+                        <strong>{healthReport.score ?? "--"}</strong>
+                      </motion.button>
+                    </Dialog.Trigger>
                   ) : (
                     <span className="sample-count">{t("sampleCount", { count: samples.length })}</span>
                   )}
@@ -2148,13 +2253,13 @@ export function SpeedWorkbench() {
                   <span>{t("downloadAverage")}</span>
                   <strong>{formatBandwidth(downloadStats.average, bandwidthUnit)}</strong>
                 </div>
-                <div className="metric-cell">
+                <div className={`metric-cell ${metricNeedsAttention("loadedLatency") ? "quality-warning" : ""}`}>
                   <span>{t("loadedLatency")}</span>
                   <strong>{formatLatency(overallStats.latency)}</strong>
                 </div>
-                <div className={`metric-cell ${retransmitWarning ? "quality-warning" : ""}`}>
+                <div className={`metric-cell ${metricNeedsAttention("retransmission") ? "quality-warning" : ""}`}>
                   <span className="metric-label-with-icon">
-                    {retransmitWarning && <ShieldAlert size={12} aria-hidden="true" />}
+                    {metricNeedsAttention("retransmission") && <ShieldAlert size={12} aria-hidden="true" />}
                     {t("tcpRetransmits")}
                   </span>
                   <strong>{formatNumber(overallStats.retransmits)}</strong>
@@ -2174,20 +2279,22 @@ export function SpeedWorkbench() {
                   <span>{t("peak")}</span>
                   <strong>{formatBandwidth(activeStats.peak, bandwidthUnit)}</strong>
                 </div>
-                <div className="metric-cell">
+                <div className={`metric-cell ${metricNeedsAttention("loadedLatency") ? "quality-warning" : ""}`}>
                   <span>{t("loadedLatency")}</span>
                   <strong>{formatLatency(activeStats.latency)}</strong>
                 </div>
-                <div className="metric-cell">
+                <div className={`metric-cell ${metricNeedsAttention(protocol === "udp" ? "udpJitter" : "latencyStability") ? "quality-warning" : ""}`}>
                   <span>{protocol === "udp" ? t("udpJitter") : t("rttVariation")}</span>
                   <strong>{formatLatency(activeStats.jitter)}</strong>
                 </div>
-                <div className={`metric-cell ${retransmitWarning ? "quality-warning" : ""}`}>
-                  <span>{protocol === "tcp" ? t("transferRetransmits") : t("transferred")}</span>
+                <div className={`metric-cell ${metricNeedsAttention(protocol === "tcp" ? "retransmission" : "packetLoss") ? "quality-warning" : ""}`}>
+                  <span>{protocol === "tcp" ? t("transferRetransmits") : t("udpPacketLoss")}</span>
                   <strong>
                     {protocol === "tcp"
                       ? `${formatBytes(activeStats.bytes)} / ${activeStats.retransmits}`
-                      : formatBytes(activeStats.bytes)}
+                      : packetLossPercent != null
+                        ? `${formatNumber(Number(packetLossPercent.toFixed(2)))}%`
+                        : "--"}
                   </strong>
                 </div>
               </>
@@ -2195,7 +2302,7 @@ export function SpeedWorkbench() {
           </div>
 
           <div
-            className={`status-line phase-${status.phase} ${retransmitWarning ? "has-network-warning" : ""}`}
+            className={`status-line phase-${status.phase} ${healthWarning ? "has-network-warning" : ""}`}
             role="status"
             aria-live="polite"
             title={displayedStatusMessage}
@@ -2222,6 +2329,48 @@ export function SpeedWorkbench() {
           </div>
         </section>
       </main>
+
+        <Dialog.Portal>
+          <Dialog.Overlay className="health-backdrop" />
+          <Dialog.Content className="health-dialog">
+            <div className="health-dialog-heading">
+              <div>
+                <span>{healthReport.protocol.toUpperCase()}</span>
+                <Dialog.Title>{t("healthDiagnostics")}</Dialog.Title>
+              </div>
+              <Dialog.Close asChild>
+                <button type="button" className="health-dialog-close" aria-label={t("closeHealthDiagnostics")}>
+                  <X size={17} aria-hidden="true" />
+                </button>
+              </Dialog.Close>
+            </div>
+
+            <div className={`health-overview health-${healthReport.level}`}>
+              <div className="health-score-value">
+                <strong>{healthReport.score ?? "--"}</strong>
+                <span>/ 100</span>
+              </div>
+              <div className="health-overview-copy">
+                <span>{t("healthScore")}</span>
+                <strong>{t(healthLevelKeys[healthReport.level])}</strong>
+                <small>{t(healthConfidenceKeys[healthReport.confidence])}</small>
+              </div>
+            </div>
+
+            <div className="health-metric-list">
+              {healthReport.metrics.map((metric) => (
+                <div className={`health-metric-row metric-${metric.level}`} key={metric.key}>
+                  <span className="health-metric-status" aria-hidden="true" />
+                  <div>
+                    <strong>{t(healthMetricLabelKeys[metric.key])}</strong>
+                    <span>{healthMetricValue(metric, t, formatNumber)}</span>
+                  </div>
+                  <small>{t(healthMetricLevelKeys[metric.level])}</small>
+                </div>
+              ))}
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
 
       <AlertDialog.Root open={prompt != null}>
         {prompt && (
@@ -2282,6 +2431,7 @@ export function SpeedWorkbench() {
           </AlertDialog.Portal>
         )}
       </AlertDialog.Root>
-    </div>
+      </div>
+    </Dialog.Root>
   );
 }

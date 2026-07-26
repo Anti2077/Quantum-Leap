@@ -325,8 +325,27 @@ pub struct SpeedSampleEvent {
     pub bandwidth_bps: f64,
     pub bytes: u64,
     pub latency_ms: Option<f64>,
+    pub baseline_latency_ms: Option<f64>,
     pub jitter_ms: Option<f64>,
     pub retransmits: Option<u64>,
+    pub packets: Option<u64>,
+    pub lost_packets: Option<u64>,
+    pub loss_percent: Option<f64>,
+    pub omitted: bool,
+    pub direction: TransferDirection,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeedSummaryEvent {
+    pub seconds: f64,
+    pub bandwidth_bps: f64,
+    pub bytes: u64,
+    pub jitter_ms: Option<f64>,
+    pub retransmits: Option<u64>,
+    pub packets: Option<u64>,
+    pub lost_packets: Option<u64>,
+    pub loss_percent: Option<f64>,
     pub direction: TransferDirection,
 }
 

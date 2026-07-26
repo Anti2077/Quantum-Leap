@@ -2314,66 +2314,57 @@ html[lang="en"] .standard-profile > span {
   transform: translate(-50%, 28%);
 }
 
-.speed-rating {
+.health-summary-trigger {
   display: inline-flex;
   min-height: 36px;
   align-items: center;
-  border-radius: 13px;
-  padding: 0 12px;
-  color: rgba(229, 238, 236, 0.62);
-  background: rgba(255, 255, 255, 0.045);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-  font-size: 10px;
-  font-weight: 620;
-  white-space: nowrap;
+  gap: 7px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-soft);
+  box-shadow: inset 0 0 0 1px var(--color-line);
+  cursor: pointer;
 }
 
-.speed-rating strong {
-  margin-left: 6px;
-  color: rgba(250, 253, 252, 0.96);
+.health-summary-trigger:hover {
+  color: var(--color-text);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+}
+
+.health-summary-trigger svg {
+  color: var(--color-primary-strong);
+}
+
+.health-summary-trigger span {
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.health-summary-trigger strong {
+  min-width: 22px;
+  color: var(--color-text);
   font-size: 18px;
   font-weight: 760;
   line-height: 1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
-.rating-legend {
-  color: #fff2b8;
-  background: rgba(246, 184, 74, 0.11);
-  box-shadow: inset 0 0 0 1px rgba(246, 184, 74, 0.12), 0 0 18px rgba(246, 184, 74, 0.08);
+.health-summary-trigger.health-attention svg,
+.health-summary-trigger.health-attention strong {
+  color: var(--color-warning);
 }
 
-.rating-overdrive {
-  color: #ffe09a;
-  background: rgba(246, 184, 74, 0.095);
-  box-shadow: inset 0 0 0 1px rgba(246, 184, 74, 0.11), 0 0 14px rgba(246, 184, 74, 0.06);
+.health-summary-trigger.health-poor svg,
+.health-summary-trigger.health-poor strong {
+  color: var(--color-danger);
 }
 
-.rating-prime {
-  color: #f7ca6f;
-  background: rgba(246, 184, 74, 0.08);
-}
-
-.rating-elite {
-  color: #aaf5e8;
-  background: rgba(98, 230, 209, 0.08);
-}
-
-.rating-solid {
-  color: #a9e6f5;
-  background: rgba(76, 174, 214, 0.075);
-}
-
-.rating-npc {
-  color: #b8c9c6;
-}
-
-.rating-meh {
-  color: rgba(208, 220, 217, 0.72);
-}
-
-.rating-slow {
-  color: #ff9d87;
-  background: rgba(255, 128, 102, 0.08);
+.health-summary-trigger.health-unknown svg,
+.health-summary-trigger.health-unknown strong {
+  color: var(--color-text-tertiary);
 }
 
 .fluid-chart > svg {
@@ -2545,6 +2536,195 @@ html[lang="en"] .standard-profile > span {
   color: rgba(255, 205, 112, 0.78);
 }
 
+.health-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(3, 9, 17, 0.48);
+  backdrop-filter: blur(10px) saturate(116%);
+  -webkit-backdrop-filter: blur(10px) saturate(116%);
+}
+
+.health-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 71;
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  border-radius: 14px;
+  padding: 22px;
+  color: var(--color-text);
+  background: var(--color-surface-solid);
+  box-shadow: 0 28px 80px var(--color-shadow), inset 0 0 0 1px var(--color-line);
+  transform: translate(-50%, -50%);
+}
+
+.health-dialog-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.health-dialog-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.health-dialog-heading span {
+  color: var(--color-primary-strong);
+  font-size: 9px;
+  font-weight: 720;
+}
+
+.health-dialog-heading h2 {
+  margin: 0;
+  font-size: 17px;
+  letter-spacing: 0;
+}
+
+.health-dialog-close {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-soft);
+  cursor: pointer;
+}
+
+.health-overview {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 22px;
+  padding: 0 0 20px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.health-score-value {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 94px;
+}
+
+.health-score-value strong {
+  color: var(--color-primary-strong);
+  font-size: 42px;
+  font-weight: 760;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.health-attention .health-score-value strong {
+  color: var(--color-warning);
+}
+
+.health-poor .health-score-value strong {
+  color: var(--color-danger);
+}
+
+.health-unknown .health-score-value strong {
+  color: var(--color-text-tertiary);
+}
+
+.health-score-value span,
+.health-overview-copy span,
+.health-overview-copy small {
+  color: var(--color-text-secondary);
+  font-size: 10px;
+}
+
+.health-overview-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.health-overview-copy strong {
+  font-size: 20px;
+  font-weight: 720;
+}
+
+.health-metric-list {
+  margin-top: 6px;
+}
+
+.health-metric-row {
+  display: grid;
+  min-height: 58px;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.health-metric-row:last-child {
+  border-bottom: 0;
+}
+
+.health-metric-status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-primary-strong);
+}
+
+.health-metric-row.metric-attention .health-metric-status {
+  background: var(--color-warning);
+}
+
+.health-metric-row.metric-poor .health-metric-status {
+  background: var(--color-danger);
+}
+
+.health-metric-row.metric-unknown .health-metric-status {
+  background: var(--color-text-disabled);
+}
+
+.health-metric-row > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.health-metric-row strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.health-metric-row > div span,
+.health-metric-row small {
+  color: var(--color-text-secondary);
+  font-size: 10px;
+}
+
+.health-metric-row > div span {
+  overflow-wrap: anywhere;
+}
+
+.health-metric-row small {
+  padding-left: 8px;
+  white-space: nowrap;
+}
+
+.health-metric-row.metric-attention small {
+  color: var(--color-warning);
+}
+
+.health-metric-row.metric-poor small {
+  color: var(--color-danger);
+}
+
 .confirm-backdrop {
   position: fixed;
   inset: 0;
@@ -2683,15 +2863,6 @@ html[lang="en"] .standard-profile > span {
   .mac-shell {
     width: 100px;
     height: 100px;
-  }
-
-  .speed-rating {
-    min-height: 33px;
-    padding: 0 10px;
-  }
-
-  .speed-rating strong {
-    font-size: 16px;
   }
 
   .ticker-value {

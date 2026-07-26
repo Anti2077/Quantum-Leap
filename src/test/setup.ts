@@ -30,44 +30,37 @@ class MemoryStorage implements Storage {
 
 const storage = new MemoryStorage();
 Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
-Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
 
-Object.defineProperty(window, "matchMedia", {
-  configurable: true,
-  value: vi.fn().mockImplementation((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    dispatchEvent: vi.fn()
-  }))
-});
+if (typeof window !== "undefined") {
+  Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    }))
+  });
 
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+
+  Object.defineProperty(window, "ResizeObserver", {
+    configurable: true,
+    value: ResizeObserverStub
+  });
+  Object.defineProperty(window, "scrollTo", { configurable: true, value: vi.fn() });
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
+  Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+    configurable: true,
+    value: vi.fn(() => null)
+  });
 }
-
-Object.defineProperty(window, "ResizeObserver", {
-  configurable: true,
-  value: ResizeObserverStub
-});
-
-Object.defineProperty(window, "scrollTo", {
-  configurable: true,
-  value: vi.fn()
-});
-
-Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
-  configurable: true,
-  value: vi.fn()
-});
-
-Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
-  configurable: true,
-  value: vi.fn(() => null)
-});

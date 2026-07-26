@@ -48,8 +48,25 @@ export interface SpeedSample {
   bandwidthBps: number;
   bytes: number;
   latencyMs?: number | null;
+  baselineLatencyMs?: number | null;
   jitterMs?: number | null;
   retransmits?: number | null;
+  packets?: number | null;
+  lostPackets?: number | null;
+  lossPercent?: number | null;
+  omitted: boolean;
+  direction: TransferDirection;
+}
+
+export interface SpeedSummary {
+  seconds: number;
+  bandwidthBps: number;
+  bytes: number;
+  jitterMs?: number | null;
+  retransmits?: number | null;
+  packets?: number | null;
+  lostPackets?: number | null;
+  lossPercent?: number | null;
   direction: TransferDirection;
 }
 

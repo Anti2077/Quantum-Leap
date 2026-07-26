@@ -556,7 +556,8 @@ html[data-color-theme="light"] .remote-node {
 }
 
 html[data-color-theme="light"] .confirm-backdrop,
-html[data-color-theme="light"] .connection-drawer-backdrop {
+html[data-color-theme="light"] .connection-drawer-backdrop,
+html[data-color-theme="light"] .health-backdrop {
   background: rgba(220, 229, 238, 0.5);
 }
 
@@ -1176,7 +1177,6 @@ html[data-color-theme="light"] .about-backdrop {
 
 .project-link:hover,
 .brand-mark svg,
-.rating-elite,
 .prompt-existingServer .confirm-icon {
   color: var(--color-primary-strong);
 }
@@ -1200,35 +1200,9 @@ html[data-color-theme="light"] .about-backdrop {
   background: rgba(var(--color-primary-rgb), 0.1);
 }
 
-.rating-elite,
 .prompt-existingServer .confirm-icon {
   background: rgba(var(--color-primary-rgb), 0.09);
   box-shadow: inset 0 0 0 1px rgba(var(--color-primary-rgb), 0.12);
-}
-
-html[data-color-theme="light"] .speed-rating {
-  color: var(--color-text-secondary);
-  background: rgba(var(--color-primary-rgb), 0.08);
-  box-shadow: inset 0 0 0 1px rgba(var(--color-primary-rgb), 0.16);
-}
-
-html[data-color-theme="light"] .speed-rating strong {
-  color: var(--color-text);
-}
-
-html[data-color-theme="light"] .speed-rating.rating-legend strong,
-html[data-color-theme="light"] .speed-rating.rating-overdrive strong,
-html[data-color-theme="light"] .speed-rating.rating-prime strong {
-  color: var(--color-warning);
-}
-
-html[data-color-theme="light"] .speed-rating.rating-elite strong,
-html[data-color-theme="light"] .speed-rating.rating-solid strong {
-  color: var(--color-primary-strong);
-}
-
-html[data-color-theme="light"] .speed-rating.rating-slow strong {
-  color: var(--color-danger);
 }
 
 @keyframes overlay-in {

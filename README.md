@@ -32,6 +32,8 @@ Quantum Leap combines SSH orchestration, `iperf3` testing, and live visualizatio
 
 Additional controls include TCP/UDP selection, upload/download direction, 1-32 parallel streams, timed or continuous tests, custom remote `iperf3` paths, and per-endpoint IPv4/IPv6 binding.
 
+Completed tests include protocol-aware link diagnostics for TCP retransmissions, UDP packet loss, loaded-latency growth, RTT variation, and relative transfer stability. The health score evaluates behavior under the test load and does not grade absolute throughput.
+
 ## Test Topologies
 
 | Mode | Traffic path | Best for |
