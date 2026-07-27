@@ -1976,14 +1976,12 @@ export function SpeedWorkbench() {
               </div>
 
               <AutoHeight>
-                <AnimatePresence mode="popLayout" initial={false}>
-                  {standard ? (
+                {standard ? (
                     <motion.div
                       key="standard"
                       className="standard-settings"
                       initial={{ opacity: 0, y: 5 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -5 }}
                     >
                     <div className="standard-profile">
                       <span><Network size={13} />TCP</span>
@@ -2003,13 +2001,11 @@ export function SpeedWorkbench() {
                         {t(form.rateLimitEnabled ? "limited" : "unlimited")}
                       </button>
                     </div>
-                    <AnimatePresence initial={false}>
-                      {form.rateLimitEnabled && (
+                    {form.rateLimitEnabled && (
                         <motion.div
                           className="target-rate-reveal standard-target-rate"
                           initial={{ opacity: 0, y: -4 }}
                           animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -4 }}
                         >
                           <TargetRateInput
                             value={form.targetBitrateMbps}
@@ -2017,8 +2013,7 @@ export function SpeedWorkbench() {
                             onChange={(value) => update("targetBitrateMbps", value)}
                           />
                         </motion.div>
-                      )}
-                    </AnimatePresence>
+                    )}
                     </motion.div>
                   ) : (
                     <motion.div
@@ -2026,7 +2021,6 @@ export function SpeedWorkbench() {
                       className="advanced-settings"
                       initial={{ opacity: 0, y: 5 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -5 }}
                     >
                     <div className="advanced-segments">
                       <div>
@@ -2113,13 +2107,11 @@ export function SpeedWorkbench() {
                           {t(form.rateLimitEnabled ? "limited" : "unlimited")}
                         </span>
                       </label>
-                      <AnimatePresence initial={false}>
-                        {form.rateLimitEnabled && (
+                      {form.rateLimitEnabled && (
                           <motion.div
                             className="target-rate-reveal"
                             initial={{ opacity: 0, y: -4 }}
                             animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -4 }}
                           >
                             <TargetRateInput
                               value={form.targetBitrateMbps}
@@ -2127,12 +2119,10 @@ export function SpeedWorkbench() {
                               onChange={(value) => update("targetBitrateMbps", value)}
                             />
                           </motion.div>
-                        )}
-                      </AnimatePresence>
+                      )}
                     </div>
                     </motion.div>
-                  )}
-                </AnimatePresence>
+                )}
               </AutoHeight>
 
               <div className="form-actions">

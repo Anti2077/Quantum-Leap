@@ -11,7 +11,7 @@
     <img src="https://img.shields.io/badge/macOS-13%2B-111111?logo=apple" alt="macOS 13 或更高版本">
     <img src="https://img.shields.io/badge/Apple_Silicon-arm64-111111?logo=apple" alt="Apple Silicon arm64">
     <img src="https://img.shields.io/badge/Windows-10%2F11_x64-0078D4?logo=windows" alt="Windows 10 和 11 x64">
-    <img src="https://img.shields.io/badge/Linux-x64-FCC624?logo=linux&logoColor=111111" alt="Linux x64">
+    <img src="https://img.shields.io/badge/Linux-x64%20%2F%20ARM64-FCC624?logo=linux&logoColor=111111" alt="Linux x64 与 ARM64">
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0-only"></a>
   </p>
   <p><a href="https://github.com/Anti2077/Quantum-Leap/releases/latest"><strong>下载最新版本</strong></a></p>
@@ -30,7 +30,7 @@ Quantum Leap 将 SSH 远程编排、`iperf3` 测速和实时可视化整合在�
 | **03** | 可控自动化 | 远端服务启动、复用确认、会话进程清理与 SSH 主机密钥验证 |
 | **04** | 跨平台工作流 | 原生凭据存储、中英双语、浅色/深色主题与响应式布局 |
 
-更多控制包括 TCP/UDP、上传/下载方向、1–32 并发、定时或持续测速、自定义远端 `iperf3` 路径，以及每个端点独立的 IPv4/IPv6 绑定地址。
+更多控制包括 TCP/UDP、上传/下载方向、可选总目标速率、1–32 并发、定时或持续测速、自定义远端 `iperf3` 路径，以及每个端点独立的 IPv4/IPv6 绑定地址。
 
 ## 测速拓扑
 
@@ -61,11 +61,11 @@ Quantum Leap 将 SSH 远程编排、`iperf3` 测速和实时可视化整合在�
 - **本机测速 / 直连已有服务：**直接连接 Docker、`systemd` 或手动启动的持久 `iperf3 -s`；Quantum Leap 不会终止该服务。
 - **双端互测：**填写两个 SSH 端点，一端运行客户端、另一端运行服务端，本机应用负责编排整个会话。
 
-标准模式固定使用 TCP 和 8 并发，依次执行 10 秒上传和 10 秒下载。高级模式支持 TCP/UDP、任一方向、1–32 并发，以及 3–120 秒或持续运行；UDP 使用 `-b 0` 进行不限速测试。
+标准模式固定使用 TCP 和 8 并发，依次执行 10 秒上传和 10 秒下载。高级模式支持 TCP/UDP、任一方向、1–32 并发，以及 3–120 秒或持续运行；两种模式都可设置总目标速率，不限速 UDP 使用 `-b 0`。
 
 ## 安装
 
-当前公开 Release 是面向 macOS ARM64、Windows x64 与 Linux x64 的 **Quantum Leap 1.3.1**。
+当前公开 Release 是面向 macOS ARM64、Windows x64 与 Linux x64/ARM64 的 **Quantum Leap 1.4.0**。
 
 1. 打开 [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest)，下载对应平台的软件包。
 2. macOS 打开 DMG 后将 **Quantum Leap** 拖入 **Applications**；Windows 运行 NSIS 安装程序；Linux 可运行 AppImage 或安装 DEB 软件包。
@@ -75,11 +75,9 @@ Quantum Leap 将 SSH 远程编排、`iperf3` 测速和实时可视化整合在�
 
 Windows NSIS、Linux AppImage 与 Linux DEB 作为未签名的正式 Release 附件发布。Windows 可能出现 SmartScreen 提示，安装前请使用随 Release 提供的 SHA-256 清单校验下载文件。
 
-跨平台构建工作流还会在 Pull Request、`main` 推送和手动运行时生成未签名的 Linux ARM64 AppImage 与 DEB 制品。Actions 制品保留 14 天，不属于 GitHub Release 附件。
-
 ## 系统要求
 
-- macOS 13 Ventura 或更高版本、Windows 10/11 x64，或使用 glibc 的 Ubuntu/Debian x64 桌面环境
+- macOS 13 Ventura 或更高版本、Windows 10/11 x64，或使用 glibc 的 Ubuntu/Debian x64/ARM64 桌面环境
 - macOS 本机及所有远端设备建议安装 `iperf3` 3.12 或更高版本
 - Windows/Linux 本机测速默认使用安装包内置、固定源码版本的 `iperf3` 3.21 sidecar
 - Linux 保存敏感凭据需要桌面环境提供 Secret Service

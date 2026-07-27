@@ -11,7 +11,7 @@
     <img src="https://img.shields.io/badge/macOS-13%2B-111111?logo=apple" alt="macOS 13 or later">
     <img src="https://img.shields.io/badge/Apple_Silicon-arm64-111111?logo=apple" alt="Apple Silicon arm64">
     <img src="https://img.shields.io/badge/Windows-10%2F11_x64-0078D4?logo=windows" alt="Windows 10 and 11 x64">
-    <img src="https://img.shields.io/badge/Linux-x64-FCC624?logo=linux&logoColor=111111" alt="Linux x64">
+    <img src="https://img.shields.io/badge/Linux-x64%20%2F%20ARM64-FCC624?logo=linux&logoColor=111111" alt="Linux x64 and ARM64">
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0-only"></a>
   </p>
   <p><a href="https://github.com/Anti2077/Quantum-Leap/releases/latest"><strong>Download the latest release</strong></a></p>
@@ -30,7 +30,7 @@ Quantum Leap combines SSH orchestration, `iperf3` testing, and live visualizatio
 | **03** | Controlled automation | Remote service startup, reuse confirmation, session-owned cleanup, and SSH host-key verification |
 | **04** | Cross-platform workflow | Native credential storage, English and Simplified Chinese UI, light/dark themes, and responsive layouts |
 
-Additional controls include TCP/UDP selection, upload/download direction, 1-32 parallel streams, timed or continuous tests, custom remote `iperf3` paths, and per-endpoint IPv4/IPv6 binding.
+Additional controls include TCP/UDP selection, upload/download direction, an optional total target bitrate, 1-32 parallel streams, timed or continuous tests, custom remote `iperf3` paths, and per-endpoint IPv4/IPv6 binding.
 
 ## Test Topologies
 
@@ -61,11 +61,11 @@ Choose TCP or UDP, transfer direction, concurrency, duration, and the exact loca
 - **Local test / Existing service:** connect directly to a persistent Docker, `systemd`, or manually started `iperf3 -s`; Quantum Leap does not stop that service.
 - **Device-to-device:** provide two SSH endpoints; one runs the client and the other runs the server while the local app coordinates the session.
 
-The standard profile runs TCP with 8 streams, testing upload and download for 10 seconds each. Advanced mode supports TCP or UDP, either direction, 1-32 streams, and 3-120 seconds or continuous operation. UDP uses `-b 0` for an unlimited target bitrate.
+The standard profile runs TCP with 8 streams, testing upload and download for 10 seconds each. Advanced mode supports TCP or UDP, either direction, 1-32 streams, and 3-120 seconds or continuous operation. Both profiles can apply an optional total target bitrate; unlimited UDP uses `-b 0`.
 
 ## Install
 
-The current public release is **Quantum Leap 1.3.1** for macOS ARM64, Windows x64, and Linux x64.
+The current public release is **Quantum Leap 1.4.0** for macOS ARM64, Windows x64, and Linux x64/ARM64.
 
 1. Open [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest) and download the package for your platform.
 2. On macOS, open the DMG and drag **Quantum Leap** into **Applications**. On Windows, run the NSIS installer. On Linux, use the AppImage or install the DEB package.
@@ -75,11 +75,9 @@ The public macOS build is ad-hoc signed and is not notarized with Apple Develope
 
 Windows NSIS, Linux AppImage, and Linux DEB packages are published as unsigned Release assets. Windows may show a SmartScreen warning; verify downloads against the attached SHA-256 manifest before installing.
 
-The cross-platform build workflow also produces unsigned Linux ARM64 AppImage and DEB artifacts for pull requests, `main` pushes, and manual runs. Actions artifacts are retained for 14 days and are not GitHub Release assets.
-
 ## Requirements
 
-- macOS 13 Ventura or later, Windows 10/11 x64, or an x64 Ubuntu/Debian desktop using glibc
+- macOS 13 Ventura or later, Windows 10/11 x64, or an x64/ARM64 Ubuntu/Debian desktop using glibc
 - `iperf3` 3.12 or later is recommended on macOS and all remote devices
 - Windows and Linux local tests use a bundled, source-pinned `iperf3` 3.21 sidecar by default
 - Linux credential storage requires a desktop Secret Service provider
