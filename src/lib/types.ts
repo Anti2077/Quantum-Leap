@@ -37,6 +37,7 @@ export interface SpeedTestRequest {
   protocol: TransportProtocol;
   parallelStreams: number;
   durationSeconds: number;
+  targetBitrateBps: number;
   reuseExistingServer: boolean;
   allowHostKeyMismatch: boolean;
   testTopology: TestTopology;

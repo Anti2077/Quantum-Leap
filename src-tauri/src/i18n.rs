@@ -68,6 +68,7 @@ const ENGLISH_REPLACEMENTS: &[(&str, &str)] = &[
     ("请输入 SSH 私钥路径", "Enter an SSH private key path."),
     ("端口必须在 1 到 65535 之间", "The port must be between 1 and 65535."),
     ("并发线程必须在 1 到 32 之间", "Parallel streams must be between 1 and 32."),
+    ("总目标速率不能超过 100000 Mbps", "The total target rate cannot exceed 100000 Mbps."),
     ("服务器备注不能超过 48 个字符", "The server note cannot exceed 48 characters."),
     ("服务器地址不能为空", "The server address cannot be empty."),
     ("SSH 模式需要填写用户名", "SSH mode requires a username."),
@@ -173,6 +174,10 @@ mod tests {
         assert_eq!(
             localize(UiLanguage::ZhCn, "端口必须在 1 到 65535 之间"),
             "端口必须在 1 到 65535 之间"
+        );
+        assert_eq!(
+            localize(UiLanguage::En, "总目标速率不能超过 100000 Mbps"),
+            "The total target rate cannot exceed 100000 Mbps."
         );
     }
 

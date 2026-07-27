@@ -3,6 +3,7 @@ use std::net::IpAddr;
 
 pub const STANDARD_DURATION_SECONDS: u16 = 10;
 pub const STANDARD_PARALLEL_STREAMS: u8 = 8;
+pub const MAX_TARGET_BITRATE_BPS: u64 = 100_000_000_000;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub enum UiLanguage {
@@ -140,6 +141,8 @@ pub struct SpeedTestRequest {
     pub protocol: TransportProtocol,
     pub parallel_streams: u8,
     pub duration_seconds: u16,
+    #[serde(default)]
+    pub target_bitrate_bps: u64,
     pub reuse_existing_server: bool,
     pub allow_host_key_mismatch: bool,
     #[serde(default)]
@@ -191,6 +194,9 @@ impl SpeedTestRequest {
         }
         if self.test_mode == TestMode::Advanced && !(1..=32).contains(&self.parallel_streams) {
             return Err("并发线程必须在 1 到 32 之间".into());
+        }
+        if self.target_bitrate_bps > MAX_TARGET_BITRATE_BPS {
+            return Err("总目标速率不能超过 100000 Mbps".into());
         }
         Ok(())
     }
@@ -354,6 +360,7 @@ mod tests {
             protocol: TransportProtocol::Udp,
             parallel_streams: 12,
             duration_seconds: 45,
+            target_bitrate_bps: 0,
             reuse_existing_server: false,
             allow_host_key_mismatch: false,
             test_topology: TestTopology::LocalToRemote,
@@ -387,6 +394,18 @@ mod tests {
 
         assert!(request.validate().is_ok());
         assert_eq!(request.effective_duration(), 0);
+    }
+
+    #[test]
+    fn accepts_unlimited_and_bounded_target_bitrates() {
+        let mut request = request(TestMode::Standard);
+        assert!(request.validate().is_ok());
+
+        request.target_bitrate_bps = 100_000_000;
+        assert!(request.validate().is_ok());
+
+        request.target_bitrate_bps = MAX_TARGET_BITRATE_BPS + 1;
+        assert!(request.validate().is_err());
     }
 
     #[test]

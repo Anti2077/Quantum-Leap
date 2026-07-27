@@ -102,6 +102,8 @@ interface ConnectionForm {
   protocol: TransportProtocol;
   parallelStreams: string;
   durationSeconds: string;
+  rateLimitEnabled: boolean;
+  targetBitrateMbps: string;
 }
 
 interface RemoteClientForm {
@@ -144,7 +146,9 @@ const initialForm: ConnectionForm = {
   direction: "upload",
   protocol: "tcp",
   parallelStreams: "8",
-  durationSeconds: "10"
+  durationSeconds: "10",
+  rateLimitEnabled: false,
+  targetBitrateMbps: "100"
 };
 
 const initialRemoteClientForm: RemoteClientForm = {
@@ -249,6 +253,69 @@ function FieldLabel({ icon, children }: { icon: ReactNode; children: ReactNode }
       {icon}
       {children}
     </span>
+  );
+}
+
+function TargetRateInput({
+  value,
+  disabled,
+  onChange
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <label className="target-rate-field">
+      <div className="duration-input target-rate-input">
+        <input
+          className="glass-input"
+          type="number"
+          min="0.1"
+          max="100000"
+          step="0.1"
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+          aria-label={t("targetRate")}
+        />
+        <span>{t("megabitsPerSecond")}</span>
+      </div>
+    </label>
+  );
+}
+
+function AutoHeight({ children }: { children: ReactNode }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number | "auto">("auto");
+
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content || typeof ResizeObserver === "undefined") return;
+
+    const updateHeight = () => {
+      const nextHeight = content.getBoundingClientRect().height;
+      setHeight((current) => current === nextHeight ? current : nextHeight);
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <motion.div
+      className="test-settings-transition"
+      initial={false}
+      animate={{ height }}
+      transition={{ height: { duration: 0.5, ease: [0.4, 0, 0.2, 1] } }}
+    >
+      <div ref={contentRef} className="test-settings-content">
+        {children}
+      </div>
+    </motion.div>
   );
 }
 
@@ -690,6 +757,13 @@ export function SpeedWorkbench() {
   const continuous = !standard && duration === 0;
   const parallelStreams = standard ? STANDARD_PARALLEL_STREAMS : Number(form.parallelStreams) || 1;
   const protocol: TransportProtocol = standard ? "tcp" : form.protocol;
+  const requestedTargetRate = Number(form.targetBitrateMbps);
+  const rateLimitValid =
+    !form.rateLimitEnabled ||
+    (Number.isFinite(requestedTargetRate) && requestedTargetRate >= 0.1 && requestedTargetRate <= 100000);
+  const targetBitrateBps = form.rateLimitEnabled && rateLimitValid
+    ? Math.round(requestedTargetRate * 1_000_000)
+    : 0;
   const remoteIperfPath = form.remoteIperfPath.trim();
   const remoteIperfPathInvalid = sshManaged && remoteIperfPath.length > 0 && !remoteIperfPath.startsWith("/");
   const clientRemoteIperfPath = clientForm.remoteIperfPath.trim();
@@ -759,6 +833,7 @@ export function SpeedWorkbench() {
     !remoteIperfPathInvalid &&
     !localBindIpInvalid &&
     !serverBindIpInvalid &&
+    rateLimitValid &&
     clientValid &&
     (!sshManaged || (
       form.username.trim().length > 0 &&
@@ -1006,6 +1081,7 @@ export function SpeedWorkbench() {
       protocol,
       parallelStreams,
       durationSeconds: duration,
+      targetBitrateBps,
       reuseExistingServer: false,
       allowHostKeyMismatch: false,
       testTopology: form.testTopology,
@@ -1899,27 +1975,59 @@ export function SpeedWorkbench() {
                 </button>
               </div>
 
-              <AnimatePresence mode="wait" initial={false}>
-                {standard ? (
-                  <motion.div
-                    key="standard"
-                    className="standard-profile"
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -5 }}
-                  >
-                    <span><Network size={13} />TCP</span>
-                    <span><Layers3 size={13} />{t("streams", { count: STANDARD_PARALLEL_STREAMS })}</span>
-                    <span><Waves size={13} />{t("bidirectionalDuration", { seconds: STANDARD_DURATION_SECONDS })}</span>
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key="advanced"
-                    className="advanced-settings"
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -5 }}
-                  >
+              <AutoHeight>
+                <AnimatePresence mode="popLayout" initial={false}>
+                  {standard ? (
+                    <motion.div
+                      key="standard"
+                      className="standard-settings"
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -5 }}
+                    >
+                    <div className="standard-profile">
+                      <span><Network size={13} />TCP</span>
+                      <span><Layers3 size={13} />{t("streams", { count: STANDARD_PARALLEL_STREAMS })}</span>
+                      <span aria-label={t("bidirectionalDuration", { seconds: STANDARD_DURATION_SECONDS })}>
+                        <Waves size={13} />
+                        {t("standardBidirectionalDuration", { seconds: STANDARD_DURATION_SECONDS })}
+                      </span>
+                      <button
+                        type="button"
+                        className={`standard-rate-toggle ${form.rateLimitEnabled ? "is-enabled" : ""}`}
+                        disabled={busy}
+                        onClick={() => update("rateLimitEnabled", !form.rateLimitEnabled)}
+                        aria-label={`${t("rateLimit")}: ${t(form.rateLimitEnabled ? "limited" : "unlimited")}`}
+                      >
+                        <Gauge size={13} aria-hidden="true" />
+                        {t(form.rateLimitEnabled ? "limited" : "unlimited")}
+                      </button>
+                    </div>
+                    <AnimatePresence initial={false}>
+                      {form.rateLimitEnabled && (
+                        <motion.div
+                          className="target-rate-reveal standard-target-rate"
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                        >
+                          <TargetRateInput
+                            value={form.targetBitrateMbps}
+                            disabled={busy}
+                            onChange={(value) => update("targetBitrateMbps", value)}
+                          />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="advanced"
+                      className="advanced-settings"
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -5 }}
+                    >
                     <div className="advanced-segments">
                       <div>
                         <span className="compact-label">{t("protocol")}</span>
@@ -1987,9 +2095,45 @@ export function SpeedWorkbench() {
                         </div>
                       </label>
                     </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                    <div className="advanced-rate-control">
+                      <label className="rate-limit-toggle">
+                        <span className="rate-limit-title">
+                          <Gauge size={13} aria-hidden="true" />
+                          {t("rateLimit")}
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={form.rateLimitEnabled}
+                          disabled={busy}
+                          onChange={(event) => update("rateLimitEnabled", event.target.checked)}
+                          aria-label={t("rateLimit")}
+                        />
+                        <span className="compact-switch" aria-hidden="true"><i /></span>
+                        <span className="rate-limit-state">
+                          {t(form.rateLimitEnabled ? "limited" : "unlimited")}
+                        </span>
+                      </label>
+                      <AnimatePresence initial={false}>
+                        {form.rateLimitEnabled && (
+                          <motion.div
+                            className="target-rate-reveal"
+                            initial={{ opacity: 0, y: -4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -4 }}
+                          >
+                            <TargetRateInput
+                              value={form.targetBitrateMbps}
+                              disabled={busy}
+                              onChange={(value) => update("targetBitrateMbps", value)}
+                            />
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </AutoHeight>
 
               <div className="form-actions">
                 <button type="submit" className="primary-action" disabled={!valid || busy}>

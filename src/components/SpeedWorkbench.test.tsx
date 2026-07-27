@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { listSavedServers } from "../lib/api";
+import { listSavedServers, startSpeedTest } from "../lib/api";
 import { I18nProvider } from "../lib/i18n";
 import { SpeedWorkbench } from "./SpeedWorkbench";
 
@@ -45,6 +45,7 @@ function renderWorkbench() {
 
 describe("responsive workspace", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     localStorage.clear();
     document.documentElement.dataset.colorTheme = "dark";
     mockCompactLayout(false);
@@ -117,6 +118,43 @@ describe("responsive workspace", () => {
     expect(screen.queryByRole("separator")).toBeNull();
     expect(screen.getByRole("button", { name: "Configure connection" })).not.toBeNull();
     expect(getItem).not.toHaveBeenCalledWith("pulse.layout-split");
+  });
+
+  it("shares the target rate control between standard and advanced modes", async () => {
+    const user = userEvent.setup();
+    renderWorkbench();
+
+    await user.click(screen.getByRole("button", { name: "Rate limit: Unlimited" }));
+    const targetRate = screen.getByRole("spinbutton", { name: "Total target rate" });
+    await user.clear(targetRate);
+    await user.type(targetRate, "125");
+
+    await user.click(screen.getByRole("button", { name: "Advanced test" }));
+    expect((screen.getByRole("checkbox", { name: "Rate limit" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("spinbutton", { name: "Total target rate" }) as HTMLInputElement).value).toBe("125");
+
+    await user.click(screen.getByRole("checkbox", { name: "Rate limit" }));
+    expect(screen.queryByRole("spinbutton", { name: "Total target rate" })).toBeNull();
+  });
+
+  it("submits the standard profile with an aggregate target bitrate", async () => {
+    const user = userEvent.setup();
+    renderWorkbench();
+
+    await user.click(screen.getByRole("button", { name: "Existing service" }));
+    await user.type(screen.getByRole("textbox", { name: "Server address" }), "127.0.0.1");
+    await user.click(screen.getByRole("button", { name: "Rate limit: Unlimited" }));
+    const targetRate = screen.getByRole("spinbutton", { name: "Total target rate" });
+    await user.clear(targetRate);
+    await user.type(targetRate, "100");
+    await user.click(screen.getByRole("button", { name: "Start full test" }));
+
+    await waitFor(() => expect(startSpeedTest).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(startSpeedTest).mock.calls[0][0]).toMatchObject({
+      testMode: "standard",
+      parallelStreams: 8,
+      targetBitrateBps: 100_000_000
+    });
   });
 });
 

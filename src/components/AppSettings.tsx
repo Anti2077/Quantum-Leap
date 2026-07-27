@@ -6,8 +6,6 @@ import Activity from "lucide-react/dist/esm/icons/activity.js";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
 import ExternalLink from "lucide-react/dist/esm/icons/external-link.js";
 import Info from "lucide-react/dist/esm/icons/info.js";
-import Moon from "lucide-react/dist/esm/icons/moon.js";
-import Sun from "lucide-react/dist/esm/icons/sun.js";
 import X from "lucide-react/dist/esm/icons/x.js";
 import { useEffect, useRef, useState } from "react";
 import packageMetadata from "../../package.json";
@@ -53,16 +51,6 @@ export function AppSettings({
     }
   }, [aboutOpen]);
 
-  const toggleSystemTheme = () => {
-    if (theme.mode === "auto") setThemeMode(theme.resolved);
-    else setThemeMode("auto");
-  };
-
-  const toggleManualTheme = () => {
-    if (theme.mode === "auto") return;
-    setThemeMode(theme.resolved === "light" ? "dark" : "light");
-  };
-
   const showAbout = () => {
     onOpenChange(false);
     setAboutOpen(true);
@@ -101,29 +89,27 @@ export function AppSettings({
             >
               <div className="settings-heading">{t("settings")}</div>
               <div className="settings-section-label">{t("appearance")}</div>
-              <div className="appearance-row">
-                <label className="system-theme-control">
-                  <input
-                    type="checkbox"
-                    checked={theme.mode === "auto"}
-                    onChange={toggleSystemTheme}
-                  />
-                  <span className="compact-switch" aria-hidden="true"><i /></span>
-                  <span>{t("followSystem")}</span>
-                </label>
-                <button
-                  type="button"
-                  className={`manual-theme-switch is-${theme.resolved}`}
-                  disabled={theme.mode === "auto"}
-                  onClick={toggleManualTheme}
-                  aria-label={theme.resolved === "light" ? t("light") : t("dark")}
-                  title={theme.resolved === "light" ? t("light") : t("dark")}
-                >
-                  <Sun size={13} aria-hidden="true" />
-                  <span aria-hidden="true"><i /></span>
-                  <Moon size={13} aria-hidden="true" />
-                </button>
-              </div>
+              <fieldset className="appearance-row">
+                <legend className="visually-hidden">{t("appearance")}</legend>
+                <div className="theme-mode-control" data-theme-mode={theme.mode}>
+                  {([
+                    ["auto", t("followSystem")],
+                    ["light", t("light")],
+                    ["dark", t("dark")]
+                  ] as const).map(([mode, label]) => (
+                    <label key={mode}>
+                      <input
+                        type="radio"
+                        name="theme-mode"
+                        value={mode}
+                        checked={theme.mode === mode}
+                        onChange={() => setThemeMode(mode)}
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
 
               <label className="language-row">
                 <span>{t("language")}</span>

@@ -348,6 +348,7 @@ fn client_args(
     protocol: TransportProtocol,
     parallel_streams: u8,
     duration_seconds: u16,
+    target_bitrate_bps: u64,
     json_stream: bool,
 ) -> Vec<String> {
     let mut args = vec![
@@ -367,7 +368,14 @@ fn client_args(
         args.insert(insert_at, "--json-stream".into());
     }
     if protocol == TransportProtocol::Udp {
-        args.extend(["-u".into(), "-b".into(), "0".into()]);
+        args.push("-u".into());
+    }
+    if target_bitrate_bps > 0 {
+        let streams = u64::from(parallel_streams.max(1));
+        let per_stream_bitrate_bps = target_bitrate_bps.div_ceil(streams);
+        args.extend(["-b".into(), per_stream_bitrate_bps.to_string()]);
+    } else if protocol == TransportProtocol::Udp {
+        args.extend(["-b".into(), "0".into()]);
     }
     if direction == TransferDirection::Download {
         args.push("-R".into());
@@ -445,6 +453,7 @@ pub async fn run_local_client(
             protocol,
             parallel_streams,
             duration_seconds,
+            request.target_bitrate_bps,
             json_stream,
         ))
         .set_raw_out(true);
@@ -566,6 +575,7 @@ fn run_remote_client_blocking(
     protocol: TransportProtocol,
     parallel_streams: u8,
     duration_seconds: u16,
+    target_bitrate_bps: u64,
     cancel: &AtomicBool,
     remote_pid: &AtomicU32,
 ) -> Result<(), RunError> {
@@ -581,6 +591,7 @@ fn run_remote_client_blocking(
         protocol,
         parallel_streams,
         duration_seconds,
+        target_bitrate_bps,
         true,
     );
     let command = remote_client_command(client, &args);
@@ -713,6 +724,7 @@ pub async fn run_remote_client(
     protocol: TransportProtocol,
     parallel_streams: u8,
     duration_seconds: u16,
+    target_bitrate_bps: u64,
     cancel: Arc<AtomicBool>,
     remote_pid: Arc<AtomicU32>,
 ) -> Result<(), RunError> {
@@ -729,6 +741,7 @@ pub async fn run_remote_client(
             protocol,
             parallel_streams,
             duration_seconds,
+            target_bitrate_bps,
             &cancel,
             &remote_pid,
         )
@@ -954,6 +967,7 @@ mod tests {
             protocol: TransportProtocol::Tcp,
             parallel_streams: 1,
             duration_seconds: 10,
+            target_bitrate_bps: 0,
             reuse_existing_server: false,
             allow_host_key_mismatch: false,
             test_topology: TestTopology::LocalToRemote,
@@ -1162,6 +1176,7 @@ mod tests {
             TransportProtocol::Udp,
             8,
             30,
+            0,
             true,
         );
 
@@ -1186,11 +1201,48 @@ mod tests {
             TransportProtocol::Tcp,
             4,
             0,
+            0,
             true,
         );
 
         assert!(args.windows(2).any(|pair| pair == ["-t", "0"]));
         assert!(!args.iter().any(|argument| argument == "-B"));
+        assert!(!args.iter().any(|argument| argument == "-b"));
+    }
+
+    #[test]
+    fn divides_total_target_bitrate_across_parallel_streams() {
+        let args = client_args(
+            "127.0.0.1",
+            "",
+            5201,
+            TransferDirection::Upload,
+            TransportProtocol::Tcp,
+            8,
+            10,
+            100_000_000,
+            true,
+        );
+
+        assert!(args.windows(2).any(|pair| pair == ["-b", "12500000"]));
+    }
+
+    #[test]
+    fn rounds_per_stream_bitrate_up_to_preserve_small_total_limits() {
+        let args = client_args(
+            "127.0.0.1",
+            "",
+            5201,
+            TransferDirection::Upload,
+            TransportProtocol::Udp,
+            3,
+            10,
+            10,
+            true,
+        );
+
+        assert!(args.windows(2).any(|pair| pair == ["-b", "4"]));
+        assert!(args.iter().any(|argument| argument == "-u"));
     }
 
     #[test]
@@ -1203,6 +1255,7 @@ mod tests {
             TransportProtocol::Tcp,
             1,
             10,
+            0,
             false,
         );
 

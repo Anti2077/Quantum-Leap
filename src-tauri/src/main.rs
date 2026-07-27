@@ -354,6 +354,7 @@ async fn start_speed_test(
         let protocol = payload.effective_protocol();
         let streams = payload.effective_parallel_streams();
         let duration = payload.effective_duration();
+        let target_bitrate_bps = payload.target_bitrate_bps;
         let directions: &[TransferDirection] = if payload.test_mode == TestMode::Standard {
             &[TransferDirection::Upload, TransferDirection::Download]
         } else {
@@ -405,6 +406,7 @@ async fn start_speed_test(
                     protocol,
                     streams,
                     duration,
+                    target_bitrate_bps,
                     cancel_remote.clone(),
                     client_pid.clone(),
                 )
