@@ -65,11 +65,13 @@ Quantum Leap 将 SSH 远程编排、`iperf3` 测速和实时可视化整合在�
 
 ## 安装
 
-当前公开 Release 是面向 macOS ARM64、Windows x64 与 Linux x64/ARM64 的 **Quantum Leap 1.4.0**。
+当前公开 Release 是面向 macOS ARM64、Windows x64 与 Linux x64/ARM64 的 **Quantum Leap 1.4.1**。
 
 1. 打开 [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest)，下载对应平台的软件包。
 2. macOS 打开 DMG 后将 **Quantum Leap** 拖入 **Applications**；Windows 运行 NSIS 安装程序；Linux 可运行 AppImage 或安装 DEB 软件包。
 3. macOS 与远端设备需要自行提供 `iperf3`；Windows/Linux 本机测速默认使用安装包内置的 `iperf3` sidecar。
+
+1.4.1 为 macOS、Windows 与 Linux AppImage 引入后续版本的签名应用内更新；Linux DEB 会打开 Release 页面，避免直接替换包管理器维护的文件。由于 1.4.1 是更新器引导版本，现有用户仍需手动安装一次。
 
 当前公开 macOS 构建使用 ad-hoc 签名，尚未通过 Apple Developer ID 公证。macOS 首次启动若阻止运行，请在 Finder 中右键应用并选择**打开**，或前往**系统设置 -> 隐私与安全性**确认打开。Release 同时提供 SHA-256 校验文件。
 

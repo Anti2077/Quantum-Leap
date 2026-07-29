@@ -65,11 +65,13 @@ The standard profile runs TCP with 8 streams, testing upload and download for 10
 
 ## Install
 
-The current public release is **Quantum Leap 1.4.0** for macOS ARM64, Windows x64, and Linux x64/ARM64.
+The current public release is **Quantum Leap 1.4.1** for macOS ARM64, Windows x64, and Linux x64/ARM64.
 
 1. Open [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest) and download the package for your platform.
 2. On macOS, open the DMG and drag **Quantum Leap** into **Applications**. On Windows, run the NSIS installer. On Linux, use the AppImage or install the DEB package.
 3. macOS and remote devices must provide `iperf3`; Windows and Linux local tests use the bundled `iperf3` sidecar by default.
+
+Version 1.4.1 introduces signed in-app update delivery for future releases on macOS, Windows, and Linux AppImage installations. Linux DEB installations open the Release page so package-manager files are not replaced directly. Because this is the updater bootstrap release, existing installations must install 1.4.1 manually once.
 
 The public macOS build is ad-hoc signed and is not notarized with Apple Developer ID. If macOS blocks the first launch, right-click the app in Finder and choose **Open**, or allow it under **System Settings -> Privacy & Security**. The Release also includes a SHA-256 checksum file.
 
