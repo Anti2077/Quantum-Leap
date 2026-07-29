@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_build:
+        description: Generate updater signatures for a manually assembled release
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: desktop-${{ github.workflow }}-${{ github.ref }}
@@ -51,7 +57,16 @@ jobs:
           '
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked -- -D warnings
       - name: Build AppImage and DEB
+        if: github.event_name != 'workflow_dispatch' || inputs.release_build != true
         run: npm run tauri:build -- --bundles appimage,deb
+      - name: Build signed AppImage and DEB release artifacts
+        if: github.event_name == 'workflow_dispatch' && inputs.release_build == true
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          npm run tauri:build -- --bundles appimage,deb --config src-tauri/tauri.updater.conf.json
       - name: Inspect Linux packages
         run: |
           APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' -print -quit)
@@ -74,6 +89,7 @@ jobs:
           if-no-files-found: error
           path: |
             src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/SHA256SUMS-linux-x64.txt
 
@@ -114,7 +130,16 @@ jobs:
           '
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked -- -D warnings
       - name: Build AppImage and DEB
+        if: github.event_name != 'workflow_dispatch' || inputs.release_build != true
         run: npm run tauri:build -- --bundles appimage,deb
+      - name: Build signed AppImage and DEB release artifacts
+        if: github.event_name == 'workflow_dispatch' && inputs.release_build == true
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          npm run tauri:build -- --bundles appimage,deb --config src-tauri/tauri.updater.conf.json
       - name: Inspect Linux packages
         run: |
           APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' -print -quit)
@@ -140,6 +165,7 @@ jobs:
           if-no-files-found: error
           path: |
             src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/SHA256SUMS-linux-arm64.txt
 
@@ -181,10 +207,21 @@ jobs:
           $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notlike 'C:\tools\cygwin\bin*' }) -join ';'
           cargo clippy --manifest-path src-tauri/Cargo.toml --locked -- -D warnings
       - name: Build NSIS installer
+        if: github.event_name != 'workflow_dispatch' || inputs.release_build != true
         shell: pwsh
         run: |
           $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notlike 'C:\tools\cygwin\bin*' }) -join ';'
           npm run tauri:build -- --bundles nsis
+      - name: Build signed NSIS release artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.release_build == true
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "TAURI_SIGNING_PRIVATE_KEY is not configured" }
+          $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notlike 'C:\tools\cygwin\bin*' }) -join ';'
+          npm run tauri:build -- --bundles nsis --config src-tauri/tauri.updater.conf.json
       - name: Inspect Windows installer
         shell: pwsh
         run: |
@@ -211,4 +248,5 @@ jobs:
           if-no-files-found: error
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
             src-tauri/target/release/bundle/SHA256SUMS-windows-x64.txt

@@ -64,5 +64,16 @@
         }
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBMEMwQUNDRTJCNDg1NjEKUldSaGhiVGl6QW9NMnJjd1BVNThPTkl2cUpmUFpxVlYzOWExckJRRUY4WVJuVlhITnpUdE5LVGgK",
+      "endpoints": [
+        "https://github.com/Anti2077/Quantum-Leap/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

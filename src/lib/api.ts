@@ -13,3 +13,7 @@ export const saveServer = (payload: SaveServerRequest, language: UiLanguage) =>
   invoke<SavedServer>("save_server", { payload, language });
 export const deleteSavedServer = (id: string, language: UiLanguage) =>
   invoke("delete_saved_server", { payload: { id }, language });
+
+export type UpdateInstallMode = "appInstall" | "externalDownload";
+
+export const getUpdateInstallMode = () => invoke<UpdateInstallMode>("update_install_mode");

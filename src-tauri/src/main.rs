@@ -1,3 +1,4 @@
+mod app_update;
 mod commands;
 mod i18n;
 mod iperf;
@@ -13,7 +14,9 @@ use tauri::RunEvent;
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             start_speed_test,
@@ -21,7 +24,8 @@ fn main() {
             saved_server::list_saved_servers,
             saved_server::get_saved_server_password,
             saved_server::save_server,
-            saved_server::delete_saved_server
+            saved_server::delete_saved_server,
+            app_update::update_install_mode
         ])
         .build(tauri::generate_context!())
         .expect("failed to build app");
