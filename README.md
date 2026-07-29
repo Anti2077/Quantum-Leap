@@ -77,6 +77,16 @@ The public macOS build is ad-hoc signed and is not notarized with Apple Develope
 
 Windows NSIS, Linux AppImage, and Linux DEB packages are published as unsigned Release assets. Windows may show a SmartScreen warning; verify downloads against the attached SHA-256 manifest before installing.
 
+### Download statistics
+
+The chart counts installation and in-app update packages downloaded from GitHub Releases. Signature, checksum, and metadata files are excluded.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/readme/downloads-en-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/readme/downloads-en-light.svg">
+  <img src="docs/images/readme/downloads-en-light.svg" alt="Quantum Leap package downloads by release and platform">
+</picture>
+
 ## Requirements
 
 - macOS 13 Ventura or later, Windows 10/11 x64, or an x64/ARM64 Ubuntu/Debian desktop using glibc

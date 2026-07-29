@@ -1,0 +1,39 @@
+name: Update download chart
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-download-chart
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Generate charts
+        run: npm run docs:download-chart
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Commit updated charts
+        run: |
+          if git diff --quiet -- docs/images/readme/downloads-*.svg; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/images/readme/downloads-*.svg
+          git commit -m "Update release download chart"
+          git push

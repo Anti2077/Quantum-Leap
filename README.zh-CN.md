@@ -77,6 +77,16 @@ Quantum Leap 将 SSH 远程编排、`iperf3` 测速和实时可视化整合在�
 
 Windows NSIS、Linux AppImage 与 Linux DEB 作为未签名的正式 Release 附件发布。Windows 可能出现 SmartScreen 提示，安装前请使用随 Release 提供的 SHA-256 清单校验下载文件。
 
+### 下载量统计
+
+图表统计 GitHub Releases 中安装包与应用内更新包的下载次数，不包含签名、校验和元数据文件。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/readme/downloads-zh-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/readme/downloads-zh-light.svg">
+  <img src="docs/images/readme/downloads-zh-light.svg" alt="Quantum Leap 各版本、各平台安装包下载量">
+</picture>
+
 ## 系统要求
 
 - macOS 13 Ventura 或更高版本、Windows 10/11 x64，或使用 glibc 的 Ubuntu/Debian x64/ARM64 桌面环境
