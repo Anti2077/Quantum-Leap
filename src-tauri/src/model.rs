@@ -311,17 +311,40 @@ pub fn validate_bind_ip(value: &str, label: &str) -> Result<(), String> {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeedStateEvent {
-    pub phase: &'static str,
+    pub phase: SpeedPhase,
     pub message: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SpeedPhase {
+    Starting,
+    Confirming,
+    Running,
+    Stopping,
+    Completed,
+    Cancelled,
+    Failed,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeedPromptEvent {
-    pub kind: &'static str,
+    pub kind: PromptKind,
     pub title: String,
     pub message: String,
     pub detail: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PromptKind {
+    HostKeyMismatch,
+    ClientHostKeyMismatch,
+    ExistingServer,
+    Iperf3Missing,
+    ClientIperf3Missing,
+    ServerUnavailable,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -366,6 +389,29 @@ mod tests {
             test_topology: TestTopology::LocalToRemote,
             remote_client: None,
         }
+    }
+
+    #[test]
+    fn serializes_session_event_discriminants_for_the_frontend_contract() {
+        let state = SpeedStateEvent {
+            phase: SpeedPhase::Confirming,
+            message: "confirm".into(),
+        };
+        let prompt = SpeedPromptEvent {
+            kind: PromptKind::ClientHostKeyMismatch,
+            title: "title".into(),
+            message: "message".into(),
+            detail: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(state).expect("state should serialize")["phase"],
+            "confirming"
+        );
+        assert_eq!(
+            serde_json::to_value(prompt).expect("prompt should serialize")["kind"],
+            "clientHostKeyMismatch"
+        );
     }
 
     #[test]

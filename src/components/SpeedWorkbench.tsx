@@ -1,6 +1,4 @@
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
 import { AnimatePresence, motion } from "framer-motion";
@@ -13,20 +11,17 @@ import CircleAlert from "lucide-react/dist/esm/icons/circle-alert.js";
 import BookMarked from "lucide-react/dist/esm/icons/book-marked.js";
 import Clock3 from "lucide-react/dist/esm/icons/clock-3.js";
 import Check from "lucide-react/dist/esm/icons/check.js";
-import Copy from "lucide-react/dist/esm/icons/copy.js";
 import FileKey2 from "lucide-react/dist/esm/icons/file-key-2.js";
 import Gauge from "lucide-react/dist/esm/icons/gauge.js";
 import GripVertical from "lucide-react/dist/esm/icons/grip-vertical.js";
 import KeyRound from "lucide-react/dist/esm/icons/key-round.js";
 import Layers3 from "lucide-react/dist/esm/icons/layers-3.js";
 import Network from "lucide-react/dist/esm/icons/network.js";
-import PackageSearch from "lucide-react/dist/esm/icons/package-search.js";
 import Play from "lucide-react/dist/esm/icons/play.js";
 import Plus from "lucide-react/dist/esm/icons/plus.js";
 import Radio from "lucide-react/dist/esm/icons/radio.js";
 import Server from "lucide-react/dist/esm/icons/server.js";
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.js";
-import ShieldAlert from "lucide-react/dist/esm/icons/shield-alert.js";
 import Info from "lucide-react/dist/esm/icons/info.js";
 import Square from "lucide-react/dist/esm/icons/square.js";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
@@ -53,120 +48,45 @@ import {
   stopSpeedTest
 } from "../lib/api";
 import {
-  formatBandwidth,
   formatBandwidthParts,
-  formatBytes,
-  formatLatency,
   type BandwidthUnit
 } from "../lib/format";
 import { useI18n, type TranslationKey } from "../lib/i18n";
 import { downloadRating } from "../lib/speed-rating";
 import type {
   SavedServer,
-  SpeedPromptEvent,
-  SpeedSample,
   SpeedStateEvent,
   SpeedTestRequest,
-  ServerMode,
-  SshAuthMethod,
-  TestMode,
-  TestTopology,
-  TransferDirection,
-  TransportProtocol
+  TransferDirection
 } from "../lib/types";
-import { EnergyLink } from "./EnergyLink";
-import { ComparisonChart } from "./ComparisonChart";
-import { DataStreamField } from "./DataStreamField";
-import { FluidAreaChart } from "./FluidAreaChart";
+import {
+  buildSpeedTestRequest,
+  confirmSpeedTestRequest,
+  deriveTestConfiguration,
+  initialForm,
+  initialRemoteClientForm,
+  STANDARD_DURATION_SECONDS,
+  STANDARD_PARALLEL_STREAMS,
+  type ConnectionForm,
+  type RemoteClientForm
+} from "../features/speed-test/form-model";
+import {
+  summarizeSamples,
+  type SamplePoint
+} from "../features/speed-test/results-model";
+import { useSpeedTestSession } from "../features/speed-test/useSpeedTestSession";
+import { PromptDialog } from "../features/speed-test/PromptDialog";
+import { ResultsPanel } from "../features/speed-test/ResultsPanel";
+import {
+  buildSaveServerRequest,
+  matchingSavedServer,
+  savedServerToClientForm,
+  savedServerToConnectionForm,
+  swapRemoteEndpointForms
+} from "../features/speed-test/endpoint-model";
 import { GlassPanel } from "./GlassPanel";
-import { LocalDeviceGlyph } from "./LocalDeviceGlyph";
-import { NumberTicker } from "./NumberTicker";
 import { AppSettings } from "./AppSettings";
 
-interface ConnectionForm {
-  testTopology: TestTopology;
-  host: string;
-  sshPort: string;
-  iperfPort: string;
-  remoteIperfPath: string;
-  localBindIp: string;
-  serverBindIp: string;
-  serverMode: ServerMode;
-  username: string;
-  password: string;
-  authMethod: SshAuthMethod;
-  privateKeyPath: string;
-  passphrase: string;
-  testMode: TestMode;
-  direction: TransferDirection;
-  protocol: TransportProtocol;
-  parallelStreams: string;
-  durationSeconds: string;
-  rateLimitEnabled: boolean;
-  targetBitrateMbps: string;
-}
-
-interface RemoteClientForm {
-  host: string;
-  sshPort: string;
-  remoteIperfPath: string;
-  bindIp: string;
-  username: string;
-  password: string;
-  authMethod: SshAuthMethod;
-  privateKeyPath: string;
-  passphrase: string;
-}
-
-interface SamplePoint {
-  t: number;
-  bps: number;
-  bytes: number;
-  retransmits: number;
-  latencyMs: number | null;
-  jitterMs: number | null;
-  direction: TransferDirection;
-}
-
-const initialForm: ConnectionForm = {
-  testTopology: "localToRemote",
-  host: "",
-  sshPort: "22",
-  iperfPort: "5201",
-  remoteIperfPath: "",
-  localBindIp: "",
-  serverBindIp: "",
-  serverMode: "sshManaged",
-  username: "",
-  password: "",
-  authMethod: "password",
-  privateKeyPath: "~/.ssh/id_ed25519",
-  passphrase: "",
-  testMode: "standard",
-  direction: "upload",
-  protocol: "tcp",
-  parallelStreams: "8",
-  durationSeconds: "10",
-  rateLimitEnabled: false,
-  targetBitrateMbps: "100"
-};
-
-const initialRemoteClientForm: RemoteClientForm = {
-  host: "",
-  sshPort: "22",
-  remoteIperfPath: "",
-  bindIp: "",
-  username: "",
-  password: "",
-  authMethod: "password",
-  privateKeyPath: "~/.ssh/id_ed25519",
-  passphrase: ""
-};
-
-const terminalPhases: SpeedStateEvent["phase"][] = ["completed", "cancelled", "failed"];
-const STANDARD_DURATION_SECONDS = 10;
-const STANDARD_PARALLEL_STREAMS = 8;
-const SAMPLE_HISTORY_LIMIT = 280;
 const BANDWIDTH_UNIT_KEY = "pulse.bandwidth-unit";
 const LAYOUT_SPLIT_KEY = "pulse.layout-split";
 const DEFAULT_LAYOUT_SPLIT = 0.32;
@@ -176,23 +96,6 @@ const LAYOUT_DIVIDER_WIDTH = 20;
 const COMPACT_LAYOUT_QUERY = "(max-width: 860px)";
 const CONNECTION_FORM_ID = "connection-settings-form";
 type DesignPreviewTheme = "air" | "frost" | "crystal";
-
-function isValidIpLiteral(value: string): boolean {
-  const address = value.trim();
-  if (!address) return true;
-  const ipv4 = address.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4) {
-    return ipv4
-      .slice(1)
-      .every((octet) => (octet === "0" || !octet.startsWith("0")) && Number(octet) <= 255);
-  }
-  if (!address.includes(":") || address.includes("%") || /[\s/]/.test(address)) return false;
-  try {
-    return new URL(`http://[${address}]/`).hostname.length > 0;
-  } catch {
-    return false;
-  }
-}
 
 function designPreviewSamples(): SamplePoint[] {
   const makeDirection = (direction: TransferDirection, base: number, phase: number) =>
@@ -433,22 +336,6 @@ function errorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-function summarize(samples: SamplePoint[], direction?: TransferDirection) {
-  const selected = direction ? samples.filter((sample) => sample.direction === direction) : samples;
-  const latency = selected.map((sample) => sample.latencyMs).filter((value): value is number => value != null);
-  const jitter = selected.map((sample) => sample.jitterMs).filter((value): value is number => value != null);
-  return {
-    average: selected.length
-      ? selected.reduce((total, sample) => total + sample.bps, 0) / selected.length
-      : 0,
-    peak: Math.max(...selected.map((sample) => sample.bps), 0),
-    bytes: selected.reduce((total, sample) => total + sample.bytes, 0),
-    retransmits: selected.reduce((total, sample) => total + sample.retransmits, 0),
-    latency: latency.length ? latency.reduce((total, value) => total + value, 0) / latency.length : null,
-    jitter: jitter.length ? jitter.reduce((total, value) => total + value, 0) / jitter.length : null
-  };
-}
-
 export function SpeedWorkbench() {
   const { language, t, formatNumber } = useI18n();
   const previewParameters = import.meta.env.DEV ? new URLSearchParams(window.location.search) : null;
@@ -497,41 +384,54 @@ export function SpeedWorkbench() {
   const [endpointEditor, setEndpointEditor] = useState<"client" | "server" | null>(null);
   const [clientAdvancedOpen, setClientAdvancedOpen] = useState(false);
   const [serverAdvancedOpen, setServerAdvancedOpen] = useState(advancedPreview);
-  const [samples, setSamples] = useState<SamplePoint[]>(() =>
-    designPreviewTheme ? designPreviewSamples() : []
-  );
-  const [latest, setLatest] = useState<SpeedSample | null>(null);
-  const [prompt, setPrompt] = useState<SpeedPromptEvent | null>(() =>
-    promptPreview === "existingServer"
-      ? {
-          kind: "existingServer",
-          title: t("promptExistingTitle"),
-          message: t("promptExistingMessage"),
-          detail: "edge.example:5201"
-        }
-      : promptPreview === "hostKeyMismatch"
+  const {
+    samples,
+    latest,
+    prompt,
+    status,
+    setStatus,
+    reset: resetSession,
+    dismissPrompt
+  } = useSpeedTestSession(() => ({
+    samples: designPreviewTheme ? designPreviewSamples() : [],
+    latest: null,
+    prompt:
+      promptPreview === "existingServer"
         ? {
-            kind: "hostKeyMismatch",
-            title: t("promptHostKeyTitle"),
-            message: t("promptHostKeyMessage"),
-            detail: "SHA256:preview-host-key-fingerprint"
+            kind: "existingServer",
+            title: t("promptExistingTitle"),
+            message: t("promptExistingMessage"),
+            detail: "edge.example:5201"
           }
-        : promptPreview === "iperf3Missing"
+        : promptPreview === "hostKeyMismatch"
           ? {
-              kind: "iperf3Missing",
-              title: t("promptMissingTitle"),
-              message: t("promptMissingMessage"),
-              detail: "sudo apt-get update && sudo apt-get install -y iperf3"
+              kind: "hostKeyMismatch",
+              title: t("promptHostKeyTitle"),
+              message: t("promptHostKeyMessage"),
+              detail: "SHA256:preview-host-key-fingerprint"
             }
-          : promptPreview === "serverUnavailable"
+          : promptPreview === "iperf3Missing"
             ? {
-                kind: "serverUnavailable",
-                title: t("promptUnavailableTitle"),
-                message: t("promptUnavailableMessage"),
-                detail: t("serverAddressDetail", { host: "198.51.100.20", port: 5201 })
+                kind: "iperf3Missing",
+                title: t("promptMissingTitle"),
+                message: t("promptMissingMessage"),
+                detail: "sudo apt-get update && sudo apt-get install -y iperf3"
               }
-            : null
-  );
+            : promptPreview === "serverUnavailable"
+              ? {
+                  kind: "serverUnavailable",
+                  title: t("promptUnavailableTitle"),
+                  message: t("promptUnavailableMessage"),
+                  detail: t("serverAddressDetail", { host: "198.51.100.20", port: 5201 })
+                }
+              : null,
+    status: designPreviewTheme
+      ? resultPreview
+        ? { phase: "completed", message: t("previewComplete") }
+        : { phase: "running", message: t("previewRunning") }
+      : { phase: "idle", message: t("waitingForServer") },
+    lastGood: {}
+  }));
   const [savedServers, setSavedServers] = useState<SavedServer[]>(() =>
     designPreviewTheme
       ? [
@@ -556,17 +456,9 @@ export function SpeedWorkbench() {
   const [connectionOpen, setConnectionOpen] = useState(
     () => previewParameters?.get("drawerPreview") === "1"
   );
-  const [status, setStatus] = useState<SpeedStateEvent>(() =>
-    designPreviewTheme
-      ? resultPreview
-        ? { phase: "completed", message: t("previewComplete") }
-        : { phase: "running", message: t("previewRunning") }
-      : { phase: "idle", message: t("waitingForServer") }
-  );
   const requestRef = useRef<SpeedTestRequest | null>(null);
   const appContentRef = useRef<HTMLElement>(null);
   const endpointEditorRef = useRef<HTMLElement>(null);
-  const lastGoodSampleRef = useRef<Partial<Record<TransferDirection, SpeedSample>>>({});
   const previousLanguageRef = useRef(language);
 
   const startWindowDrag = (event: ReactMouseEvent<HTMLElement>) => {
@@ -612,69 +504,7 @@ export function SpeedWorkbench() {
     setLayoutResizing(false);
   };
 
-  useEffect(() => {
-    let mounted = true;
-    const unlisteners: Array<() => void> = [];
-
-    void listen<SpeedSample>("speed://sample", (event) => {
-      if (!mounted) return;
-      const sample = event.payload;
-      const usableRate = Number.isFinite(sample.bandwidthBps) && sample.bandwidthBps > 0;
-      if (!usableRate) {
-        const held =
-          lastGoodSampleRef.current[sample.direction] ??
-          lastGoodSampleRef.current[sample.direction === "upload" ? "download" : "upload"];
-        setLatest(held ? { ...sample, bandwidthBps: held.bandwidthBps } : sample);
-        return;
-      }
-
-      lastGoodSampleRef.current[sample.direction] = sample;
-      setLatest(sample);
-      setSamples((current) => [
-        ...current.slice(-(SAMPLE_HISTORY_LIMIT - 1)),
-        {
-          t: sample.elapsed,
-          bps: sample.bandwidthBps,
-          bytes: sample.bytes,
-          retransmits: sample.retransmits ?? 0,
-          latencyMs: sample.latencyMs ?? null,
-          jitterMs: sample.jitterMs ?? null,
-          direction: sample.direction
-        }
-      ]);
-    })
-      .then((unlisten) => {
-        if (mounted) unlisteners.push(unlisten);
-        else unlisten();
-      })
-      .catch(() => undefined);
-
-    void listen<SpeedStateEvent>("speed://state", (event) => {
-      if (mounted) setStatus(event.payload);
-    })
-      .then((unlisten) => {
-        if (mounted) unlisteners.push(unlisten);
-        else unlisten();
-      })
-      .catch(() => undefined);
-
-    void listen<SpeedPromptEvent>("speed://prompt", (event) => {
-      if (!mounted) return;
-      setPromptDetailCopied(false);
-      setPrompt(event.payload);
-      setStatus({ phase: "confirming", message: event.payload.title });
-    })
-      .then((unlisten) => {
-        if (mounted) unlisteners.push(unlisten);
-        else unlisten();
-      })
-      .catch(() => undefined);
-
-    return () => {
-      mounted = false;
-      unlisteners.forEach((dispose) => dispose());
-    };
-  }, []);
+  useEffect(() => setPromptDetailCopied(false), [prompt]);
 
   useEffect(() => {
     void listSavedServers(language)
@@ -744,55 +574,39 @@ export function SpeedWorkbench() {
   }, [busy, language, status.phase, t]);
 
   const running = previewDirection != null || status.phase === "running";
-  const standard = form.testMode === "standard";
-  const remoteToRemote = form.testTopology === "remoteToRemote";
-  const sshManaged = form.serverMode === "sshManaged";
+  const testConfiguration = deriveTestConfiguration(form, clientForm);
+  const {
+    standard,
+    remoteToRemote,
+    sshManaged,
+    duration,
+    continuous,
+    parallelStreams,
+    protocol,
+    rateLimitValid,
+    targetBitrateBps,
+    remoteIperfPath,
+    clientRemoteIperfPath,
+    localBindIp,
+    serverBindIp,
+    clientBindIp,
+    remoteIperfPathInvalid,
+    clientRemoteIperfPathInvalid,
+    localBindIpInvalid,
+    serverBindIpInvalid,
+    clientBindIpInvalid,
+    valid,
+    canSaveCurrentServer
+  } = testConfiguration;
   const completedStandard = standard && status.phase === "completed";
-  const requestedDuration = form.durationSeconds.trim() === "" ? Number.NaN : Number(form.durationSeconds);
-  const duration = standard
-    ? STANDARD_DURATION_SECONDS
-    : Number.isFinite(requestedDuration)
-      ? requestedDuration
-      : 10;
-  const continuous = !standard && duration === 0;
-  const parallelStreams = standard ? STANDARD_PARALLEL_STREAMS : Number(form.parallelStreams) || 1;
-  const protocol: TransportProtocol = standard ? "tcp" : form.protocol;
-  const requestedTargetRate = Number(form.targetBitrateMbps);
-  const rateLimitValid =
-    !form.rateLimitEnabled ||
-    (Number.isFinite(requestedTargetRate) && requestedTargetRate >= 0.1 && requestedTargetRate <= 100000);
-  const targetBitrateBps = form.rateLimitEnabled && rateLimitValid
-    ? Math.round(requestedTargetRate * 1_000_000)
-    : 0;
-  const remoteIperfPath = form.remoteIperfPath.trim();
-  const remoteIperfPathInvalid = sshManaged && remoteIperfPath.length > 0 && !remoteIperfPath.startsWith("/");
-  const clientRemoteIperfPath = clientForm.remoteIperfPath.trim();
-  const clientRemoteIperfPathInvalid =
-    remoteToRemote && clientRemoteIperfPath.length > 0 && !clientRemoteIperfPath.startsWith("/");
-  const localBindIp = form.localBindIp.trim();
-  const serverBindIp = form.serverBindIp.trim();
-  const clientBindIp = clientForm.bindIp.trim();
-  const localBindIpInvalid = !remoteToRemote && !isValidIpLiteral(localBindIp);
-  const serverBindIpInvalid = sshManaged && !isValidIpLiteral(serverBindIp);
-  const clientBindIpInvalid = remoteToRemote && !isValidIpLiteral(clientBindIp);
-  const clientValid =
-    !remoteToRemote ||
-    (clientForm.host.trim().length > 0 &&
-      Number(clientForm.sshPort) > 0 &&
-      clientForm.username.trim().length > 0 &&
-      !clientRemoteIperfPathInvalid &&
-      !clientBindIpInvalid &&
-      (clientForm.authMethod === "privateKey"
-        ? clientForm.privateKeyPath.trim().length > 0
-        : clientForm.password.length > 0));
   const activeDirection = previewDirection ?? (standard ? (latest?.direction ?? "upload") : form.direction);
   const activeSamples = useMemo(
     () => samples.filter((sample) => sample.direction === activeDirection),
     [activeDirection, samples]
   );
-  const uploadStats = useMemo(() => summarize(samples, "upload"), [samples]);
-  const downloadStats = useMemo(() => summarize(samples, "download"), [samples]);
-  const overallStats = useMemo(() => summarize(samples), [samples]);
+  const uploadStats = useMemo(() => summarizeSamples(samples, "upload"), [samples]);
+  const downloadStats = useMemo(() => summarizeSamples(samples, "download"), [samples]);
+  const overallStats = useMemo(() => summarizeSamples(samples), [samples]);
   const activeStats = activeDirection === "upload" ? uploadStats : downloadStats;
   const totalBytes = uploadStats.bytes + downloadStats.bytes;
   const displayedRetransmits = standard ? overallStats.retransmits : activeStats.retransmits;
@@ -827,36 +641,6 @@ export function SpeedWorkbench() {
             100,
             Math.max(0, ((completedDuration + elapsed) / (duration * (standard ? 2 : 1))) * 100)
           );
-  const valid =
-    form.host.trim().length > 0 &&
-    Number(form.iperfPort) > 0 &&
-    !remoteIperfPathInvalid &&
-    !localBindIpInvalid &&
-    !serverBindIpInvalid &&
-    rateLimitValid &&
-    clientValid &&
-    (!sshManaged || (
-      form.username.trim().length > 0 &&
-      (form.authMethod === "privateKey"
-        ? form.privateKeyPath.trim().length > 0
-        : form.password.length > 0) &&
-      Number(form.sshPort) > 0
-    )) &&
-    (standard ||
-      ((duration === 0 || (duration >= 3 && duration <= 120)) &&
-        parallelStreams >= 1 &&
-        parallelStreams <= 32));
-  const canSaveCurrentServer =
-    form.host.trim().length > 0 &&
-    !remoteIperfPathInvalid &&
-    !serverBindIpInvalid &&
-    (!sshManaged || (
-      form.username.trim().length > 0 &&
-      (form.authMethod === "privateKey"
-        ? form.privateKeyPath.trim().length > 0
-        : form.password.length > 0)
-    ));
-
   const update = <K extends keyof ConnectionForm>(key: K, value: ConnectionForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
     if (key === "testTopology") {
@@ -885,17 +669,7 @@ export function SpeedWorkbench() {
       setSavedServers((current) =>
         current.map((saved) => (saved.id === server.id ? { ...saved, password } : saved))
       );
-      setClientForm({
-        host: server.host,
-        sshPort: server.sshPort.toString(),
-        remoteIperfPath: server.remoteIperfPath || "",
-        bindIp: server.bindIp || "",
-        username: server.username,
-        password,
-        authMethod: server.authMethod,
-        privateKeyPath: server.privateKeyPath || initialRemoteClientForm.privateKeyPath,
-        passphrase: server.authMethod === "privateKey" ? password : ""
-      });
+      setClientForm(savedServerToClientForm(server, password, initialRemoteClientForm.privateKeyPath));
       setStatus({ phase: "idle", message: t("clientSelected", { name: server.note || server.host }) });
     } catch (error) {
       setStatus({ phase: "failed", message: errorMessage(error, t("savedActionError")) });
@@ -906,30 +680,9 @@ export function SpeedWorkbench() {
 
   const swapRemoteEndpoints = () => {
     if (!remoteToRemote || !sshManaged || busy) return;
-    const previousServer = {
-      host: form.host,
-      sshPort: form.sshPort,
-      remoteIperfPath: form.remoteIperfPath,
-      bindIp: form.serverBindIp,
-      username: form.username,
-      password: form.password,
-      authMethod: form.authMethod,
-      privateKeyPath: form.privateKeyPath,
-      passphrase: form.passphrase
-    };
-    setForm((current) => ({
-      ...current,
-      host: clientForm.host,
-      sshPort: clientForm.sshPort,
-      remoteIperfPath: clientForm.remoteIperfPath,
-      serverBindIp: clientForm.bindIp,
-      username: clientForm.username,
-      password: clientForm.password,
-      authMethod: clientForm.authMethod,
-      privateKeyPath: clientForm.privateKeyPath,
-      passphrase: clientForm.passphrase
-    }));
-    setClientForm(previousServer);
+    const swapped = swapRemoteEndpointForms(form, clientForm);
+    setForm(swapped.server);
+    setClientForm(swapped.client);
     const previousClientSavedId = clientSavedId;
     setClientSavedId(serverSavedId);
     setServerSavedId(previousClientSavedId);
@@ -946,20 +699,7 @@ export function SpeedWorkbench() {
       setSavedServers((current) =>
         current.map((saved) => (saved.id === server.id ? { ...saved, password } : saved))
       );
-      setForm((current) => ({
-        ...current,
-        host: server.host,
-        sshPort: server.sshPort.toString(),
-        iperfPort: server.iperfPort.toString(),
-        remoteIperfPath: server.remoteIperfPath || "",
-        serverBindIp: server.bindIp || "",
-        serverMode: server.serverMode,
-        username: server.username,
-        password,
-        authMethod: server.authMethod,
-        privateKeyPath: server.privateKeyPath || initialForm.privateKeyPath,
-        passphrase: server.authMethod === "privateKey" ? password : ""
-      }));
+      setForm((current) => savedServerToConnectionForm(current, server, password, initialForm.privateKeyPath));
       setServerSavedId(server.id);
       setSavedMenuOpen(false);
       setStatus({ phase: "idle", message: t("serverLoaded", { host: server.host }) });
@@ -979,43 +719,20 @@ export function SpeedWorkbench() {
 
   const openSavedNoteEditor = () => {
     if (!canSaveCurrentServer || savedBusy) return;
-    const existing = savedServers.find(
-      (server) =>
-        server.host === form.host.trim() &&
-        server.sshPort === Number(form.sshPort) &&
-        server.username === form.username.trim() &&
-        server.serverMode === form.serverMode
-    );
+    const existing = matchingSavedServer(savedServers, form);
     setSavedNoteDraft(existing?.note ?? "");
     setSavedNoteEditorOpen(true);
   };
 
   const saveCurrentServer = async () => {
-    const savedSecret = form.authMethod === "privateKey" ? form.passphrase : form.password;
     if (!canSaveCurrentServer || savedBusy) return;
-    const existing = savedServers.find(
-      (server) =>
-        server.host === form.host.trim() &&
-        server.sshPort === Number(form.sshPort) &&
-        server.username === form.username.trim() &&
-        server.serverMode === form.serverMode
-    );
+    const existing = matchingSavedServer(savedServers, form);
     setSavedBusy(true);
     try {
-      const saved = await saveServer({
-        id: existing?.id,
-        note: savedNoteDraft.trim(),
-        host: form.host.trim(),
-        sshPort: Number(form.sshPort),
-        iperfPort: Number(form.iperfPort),
-        remoteIperfPath,
-        bindIp: sshManaged ? serverBindIp : "",
-        serverMode: form.serverMode,
-        username: form.username.trim(),
-        password: savedSecret,
-        authMethod: form.authMethod,
-        privateKeyPath: form.privateKeyPath.trim()
-      }, language);
+      const saved = await saveServer(
+        buildSaveServerRequest(form, savedNoteDraft, existing?.id),
+        language
+      );
       setSavedServers((current) => [saved, ...current.filter((server) => server.id !== saved.id)]);
       setSavedNoteEditorOpen(false);
       setSavedNoteDraft("");
@@ -1062,49 +779,9 @@ export function SpeedWorkbench() {
     event.preventDefault();
     if (!valid || busy) return;
 
-    const request: SpeedTestRequest = {
-      language,
-      host: form.host.trim(),
-      sshPort: Number(form.sshPort),
-      iperfPort: Number(form.iperfPort),
-      remoteIperfPath,
-      localBindIp: remoteToRemote ? "" : localBindIp,
-      serverBindIp: sshManaged ? serverBindIp : "",
-      serverMode: form.serverMode,
-      username: form.username.trim(),
-      password: form.password,
-      authMethod: form.authMethod,
-      privateKeyPath: form.privateKeyPath.trim(),
-      passphrase: form.passphrase,
-      testMode: form.testMode,
-      direction: form.direction,
-      protocol,
-      parallelStreams,
-      durationSeconds: duration,
-      targetBitrateBps,
-      reuseExistingServer: false,
-      allowHostKeyMismatch: false,
-      testTopology: form.testTopology,
-      remoteClient: remoteToRemote
-        ? {
-            host: clientForm.host.trim(),
-            sshPort: Number(clientForm.sshPort),
-            remoteIperfPath: clientRemoteIperfPath,
-            bindIp: clientBindIp,
-            username: clientForm.username.trim(),
-            password: clientForm.password,
-            authMethod: clientForm.authMethod,
-            privateKeyPath: clientForm.privateKeyPath.trim(),
-            passphrase: clientForm.passphrase,
-            allowHostKeyMismatch: false
-          }
-        : null
-    };
+    const request = buildSpeedTestRequest(language, form, clientForm, testConfiguration);
 
-    setSamples([]);
-    setLatest(null);
-    lastGoodSampleRef.current = {};
-    setPrompt(null);
+    resetSession();
     setConnectionOpen(false);
     await launch(request);
   };
@@ -1112,16 +789,8 @@ export function SpeedWorkbench() {
   const confirmPrompt = async () => {
     const request = requestRef.current;
     if (!request || !prompt) return;
-    const nextRequest = {
-      ...request,
-      reuseExistingServer: request.reuseExistingServer || prompt.kind === "existingServer",
-      allowHostKeyMismatch: request.allowHostKeyMismatch || prompt.kind === "hostKeyMismatch",
-      remoteClient:
-        request.remoteClient && prompt.kind === "clientHostKeyMismatch"
-          ? { ...request.remoteClient, allowHostKeyMismatch: true }
-          : request.remoteClient
-    };
-    setPrompt(null);
+    const nextRequest = confirmSpeedTestRequest(request, prompt.kind);
+    dismissPrompt();
     await launch(nextRequest);
   };
 
@@ -1138,7 +807,7 @@ export function SpeedWorkbench() {
   const rejectPrompt = () => {
     const missingIperf3 = prompt?.kind === "iperf3Missing" || prompt?.kind === "clientIperf3Missing";
     const serverUnavailable = prompt?.kind === "serverUnavailable";
-    setPrompt(null);
+    dismissPrompt();
     requestRef.current = null;
     setStatus({
       phase: serverUnavailable ? "failed" : "cancelled",
@@ -2175,247 +1844,48 @@ export function SpeedWorkbench() {
           </div>
         )}
 
-        <section className="speed-column">
-          <GlassPanel
-            className={`speed-stage direction-${activeDirection} ${running ? "is-running" : ""} ${completedStandard ? "is-complete" : ""}`}
-          >
-            <div className="stage-heading">
-              <div>
-                <span className="eyebrow">
-                  {standard
-                    ? t("standardProfile", { count: STANDARD_PARALLEL_STREAMS })
-                    : t("advancedProfile", { protocol: protocol.toUpperCase(), count: parallelStreams })}
-                </span>
-                <h2>
-                  {completedStandard
-                    ? t("combinedResults")
-                    : activeDirection === "upload"
-                      ? t("uploadSpeed")
-                      : t("downloadSpeed")}
-                </h2>
-              </div>
-              <div className="stage-heading-controls">
-                <div className="bandwidth-unit-switch" aria-label={t("bandwidthUnit")}>
-                  {(["Mbps", "Gbps"] as const).map((unit) => (
-                    <button
-                      type="button"
-                      key={unit}
-                      className={bandwidthUnit === unit ? "selected" : ""}
-                      onClick={() => setBandwidthUnit(unit)}
-                      aria-pressed={bandwidthUnit === unit}
-                    >
-                      {unit}
-                    </button>
-                  ))}
-                </div>
-                <div className={`live-indicator ${running ? "active" : ""}`}>
-                  <span />
-                  {running ? (continuous ? t("live") : `${Math.round(progress)}%`) : completedStandard ? t("result") : t("standby")}
-                </div>
-              </div>
-            </div>
-
-            <div className="network-stage">
-              <LocalDeviceGlyph
-                active={running || status.phase === "stopping"}
-                label={remoteToRemote ? clientForm.host.trim() || t("deviceA") : t("thisDevice")}
-                subtitle={remoteToRemote ? t("remoteClient") : t("localClient")}
-              />
-              <EnergyLink
-                direction={activeDirection}
-                active={running}
-                engaged={busy}
-                intensity={motionIntensity}
-              />
-              <DataStreamField
-                active={running || status.phase === "stopping"}
-                direction={activeDirection}
-                intensity={motionIntensity}
-              />
-              <div className="remote-node">
-                <div className="remote-header">
-                  <div className="server-identity">
-                    <span className="server-icon"><Server size={16} aria-hidden="true" /></span>
-                    <div>
-                      <strong>{form.host.trim() || t("notConnected")}</strong>
-                      <span>Port {form.iperfPort}</span>
-                    </div>
-                  </div>
-                  {completedStandard ? (
-                    <motion.span
-                      className={`speed-rating rating-${rating.key}`}
-                      initial={{ opacity: 0, scale: 0.86 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ type: "spring", stiffness: 260, damping: 20 }}
-                    >
-                      {t("downloadRating")} · <strong>{t(rating.labelKey)}</strong>
-                    </motion.span>
-                  ) : (
-                    <span className="sample-count">{t("sampleCount", { count: samples.length })}</span>
-                  )}
-                </div>
-                <NumberTicker value={rate.value} suffix={rate.unit} />
-                {completedStandard ? (
-                  <ComparisonChart
-                    upload={samples.filter((sample) => sample.direction === "upload")}
-                    download={samples.filter((sample) => sample.direction === "download")}
-                    unit={bandwidthUnit}
-                  />
-                ) : (
-                  <FluidAreaChart data={activeSamples} direction={activeDirection} unit={bandwidthUnit} />
-                )}
-                <div className={`test-progress ${continuous && running ? "is-continuous" : ""}`} aria-hidden="true">
-                  <motion.span animate={{ width: `${progress}%` }} transition={{ duration: 0.52, ease: "linear" }} />
-                </div>
-              </div>
-            </div>
-          </GlassPanel>
-
-          <div className="metrics-strip">
-            {standard ? (
-              <>
-                <div className="metric-cell accent-upload">
-                  <span>{t("uploadAverage")}</span>
-                  <strong>{formatBandwidth(uploadStats.average, bandwidthUnit)}</strong>
-                </div>
-                <div className="metric-cell accent-download">
-                  <span>{t("downloadAverage")}</span>
-                  <strong>{formatBandwidth(downloadStats.average, bandwidthUnit)}</strong>
-                </div>
-                <div className="metric-cell">
-                  <span>{t("loadedLatency")}</span>
-                  <strong>{formatLatency(overallStats.latency)}</strong>
-                </div>
-                <div className={`metric-cell ${retransmitWarning ? "quality-warning" : ""}`}>
-                  <span className="metric-label-with-icon">
-                    {retransmitWarning && <ShieldAlert size={12} aria-hidden="true" />}
-                    {t("tcpRetransmits")}
-                  </span>
-                  <strong>{formatNumber(overallStats.retransmits)}</strong>
-                </div>
-                <div className="metric-cell">
-                  <span>{t("totalTransfer")}</span>
-                  <strong>{formatBytes(totalBytes)}</strong>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="metric-cell">
-                  <span>{t("averageSpeed")}</span>
-                  <strong>{formatBandwidth(activeStats.average, bandwidthUnit)}</strong>
-                </div>
-                <div className="metric-cell">
-                  <span>{t("peak")}</span>
-                  <strong>{formatBandwidth(activeStats.peak, bandwidthUnit)}</strong>
-                </div>
-                <div className="metric-cell">
-                  <span>{t("loadedLatency")}</span>
-                  <strong>{formatLatency(activeStats.latency)}</strong>
-                </div>
-                <div className="metric-cell">
-                  <span>{protocol === "udp" ? t("udpJitter") : t("rttVariation")}</span>
-                  <strong>{formatLatency(activeStats.jitter)}</strong>
-                </div>
-                <div className={`metric-cell ${retransmitWarning ? "quality-warning" : ""}`}>
-                  <span>{protocol === "tcp" ? t("transferRetransmits") : t("transferred")}</span>
-                  <strong>
-                    {protocol === "tcp"
-                      ? `${formatBytes(activeStats.bytes)} / ${activeStats.retransmits}`
-                      : formatBytes(activeStats.bytes)}
-                  </strong>
-                </div>
-              </>
-            )}
-          </div>
-
-          <div
-            className={`status-line phase-${status.phase} ${retransmitWarning ? "has-network-warning" : ""}`}
-            role="status"
-            aria-live="polite"
-            title={displayedStatusMessage}
-          >
-            <span className="status-pulse" />
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.p
-                key={`${status.phase}-${displayedStatusMessage}`}
-                initial={{ opacity: 0, y: 5 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -5 }}
-                transition={{ duration: 0.2 }}
-              >
-                {displayedStatusMessage}
-              </motion.p>
-            </AnimatePresence>
-            <span>
-              {terminalPhases.includes(status.phase) || status.phase === "idle" || status.phase === "confirming"
-                ? t(phaseLabelKeys[status.phase])
-                : continuous
-                  ? t("live")
-                  : `${Math.round(progress)}%`}
-            </span>
-          </div>
-        </section>
+        <ResultsPanel
+          t={t}
+          formatNumber={formatNumber}
+          standard={standard}
+          remoteToRemote={remoteToRemote}
+          running={running}
+          busy={busy}
+          continuous={continuous}
+          completedStandard={completedStandard}
+          activeDirection={activeDirection}
+          protocol={protocol}
+          parallelStreams={parallelStreams}
+          clientHost={clientForm.host.trim()}
+          serverHost={form.host.trim()}
+          serverPort={form.iperfPort}
+          samples={samples}
+          activeSamples={activeSamples}
+          bandwidthUnit={bandwidthUnit}
+          onBandwidthUnitChange={setBandwidthUnit}
+          status={status}
+          motionIntensity={motionIntensity}
+          progress={progress}
+          rate={rate}
+          rating={rating}
+          uploadStats={uploadStats}
+          downloadStats={downloadStats}
+          overallStats={overallStats}
+          activeStats={activeStats}
+          totalBytes={totalBytes}
+          retransmitWarning={retransmitWarning}
+          displayedStatusMessage={displayedStatusMessage}
+        />
       </main>
 
-      <AlertDialog.Root open={prompt != null}>
-        {prompt && (
-          <AlertDialog.Portal>
-            <AlertDialog.Overlay className="confirm-backdrop" />
-            <AlertDialog.Content className={`confirm-dialog prompt-${prompt.kind}`}>
-              <div className="confirm-icon">
-                {prompt.kind === "hostKeyMismatch" || prompt.kind === "clientHostKeyMismatch" ? (
-                  <ShieldAlert size={21} />
-                ) : prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing" ? (
-                  <PackageSearch size={21} />
-                ) : prompt.kind === "serverUnavailable" ? (
-                  <CircleAlert size={21} />
-                ) : (
-                  <Server size={21} />
-                )}
-              </div>
-              <AlertDialog.Title asChild>
-                <h3>{prompt.title}</h3>
-              </AlertDialog.Title>
-              <AlertDialog.Description>{prompt.message}</AlertDialog.Description>
-              {prompt.detail && <code>{prompt.detail}</code>}
-              <div className="confirm-actions">
-                {prompt.kind !== "serverUnavailable" && (
-                  <AlertDialog.Cancel asChild>
-                    <button type="button" onClick={rejectPrompt}>
-                      {prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing"
-                        ? t("later")
-                        : t("cancel")}
-                    </button>
-                  </AlertDialog.Cancel>
-                )}
-                {(prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing") && prompt.detail && (
-                  <button type="button" onClick={copyPromptDetail}>
-                    {promptDetailCopied ? <Check size={13} /> : <Copy size={13} />}
-                    {promptDetailCopied ? t("copied") : t("copyCommand")}
-                  </button>
-                )}
-                {prompt.kind === "serverUnavailable" ? (
-                  <AlertDialog.Cancel asChild>
-                    <button type="button" className="confirm-primary" onClick={rejectPrompt} autoFocus>
-                      {t("close")}
-                    </button>
-                  </AlertDialog.Cancel>
-                ) : (
-                  <AlertDialog.Action asChild>
-                    <button type="button" className="confirm-primary" onClick={confirmPrompt} autoFocus>
-                      {prompt.kind === "hostKeyMismatch" || prompt.kind === "clientHostKeyMismatch"
-                        ? t("trustContinue")
-                        : prompt.kind === "iperf3Missing" || prompt.kind === "clientIperf3Missing"
-                          ? t("installedRetry")
-                          : t("reuseContinue")}
-                    </button>
-                  </AlertDialog.Action>
-                )}
-              </div>
-            </AlertDialog.Content>
-          </AlertDialog.Portal>
-        )}
-      </AlertDialog.Root>
+      <PromptDialog
+        prompt={prompt}
+        detailCopied={promptDetailCopied}
+        t={t}
+        onConfirm={confirmPrompt}
+        onReject={rejectPrompt}
+        onCopyDetail={copyPromptDetail}
+      />
     </div>
   );
 }
