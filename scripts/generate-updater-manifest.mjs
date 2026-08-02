@@ -3,6 +3,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 function parseArguments(argv) {
   const options = {};
@@ -24,6 +25,16 @@ async function requiredText(filePath, description) {
   const value = (await readFile(filePath, "utf8")).trim();
   if (!value) throw new Error(`${description} is empty: ${filePath}`);
   return value;
+}
+
+export function updaterAssets(version) {
+  const macOSUniversal = `Quantum-Leap_${version}_macOS_universal.app.tar.gz`;
+  return {
+    "darwin-aarch64": macOSUniversal,
+    "darwin-x86_64": macOSUniversal,
+    "linux-x86_64": `Quantum-Leap_${version}_Linux_x86_64.AppImage`,
+    "linux-aarch64": `Quantum-Leap_${version}_Linux_aarch64.AppImage`
+  };
 }
 
 async function main() {
@@ -53,11 +64,7 @@ async function main() {
     throw new Error(`Version mismatch: requested ${version}, package/config/Cargo contain ${versions.join(", ")}`);
   }
 
-  const assets = {
-    "darwin-aarch64": `Quantum-Leap_${version}_macOS_arm64.app.tar.gz`,
-    "linux-x86_64": `Quantum-Leap_${version}_Linux_x86_64.AppImage`,
-    "linux-aarch64": `Quantum-Leap_${version}_Linux_aarch64.AppImage`
-  };
+  const assets = updaterAssets(version);
   const platforms = {};
 
   for (const [platform, filename] of Object.entries(assets)) {
@@ -81,7 +88,9 @@ async function main() {
   console.log(`Wrote updater manifest: ${outputPath}`);
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  });
+}

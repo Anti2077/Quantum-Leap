@@ -1,7 +1,7 @@
 {
   "name": "quantum-leap",
   "private": true,
-  "version": "1.4.1",
+  "version": "1.4.2",
   "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -15,7 +15,8 @@
     "sidecar:linux": "bash scripts/build-iperf-linux.sh",
     "sidecar:windows": "powershell -ExecutionPolicy Bypass -File scripts/build-iperf-windows.ps1",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "tauri:build:macos-universal": "tauri build --target universal-apple-darwin"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.20",

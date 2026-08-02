@@ -1844,7 +1844,7 @@ dependencies = [
 
 [[package]]
 name = "iperf3_ui"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "dirs",
  "keyring",

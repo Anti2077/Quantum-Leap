@@ -9,7 +9,7 @@
   <p>
     <a href="https://github.com/Anti2077/Quantum-Leap/releases/latest"><img src="https://img.shields.io/github/v/release/Anti2077/Quantum-Leap?display_name=tag&sort=semver" alt="最新版本"></a>
     <img src="https://img.shields.io/badge/macOS-13%2B-111111?logo=apple" alt="macOS 13 或更高版本">
-    <img src="https://img.shields.io/badge/Apple_Silicon-arm64-111111?logo=apple" alt="Apple Silicon arm64">
+    <img src="https://img.shields.io/badge/Mac-Apple_Silicon_%2F_Intel-111111?logo=apple" alt="Apple Silicon 与 Intel Mac">
     <img src="https://img.shields.io/badge/Windows-10%2F11_x64-0078D4?logo=windows" alt="Windows 10 和 11 x64">
     <img src="https://img.shields.io/badge/Linux-x64%20%2F%20ARM64-FCC624?logo=linux&logoColor=111111" alt="Linux x64 与 ARM64">
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0-only"></a>
@@ -65,7 +65,7 @@ Quantum Leap 将 SSH 远程编排、`iperf3` 测速和实时可视化整合在�
 
 ## 安装
 
-当前公开 Release 是面向 macOS ARM64、Windows x64 与 Linux x64/ARM64 的 **Quantum Leap 1.4.1**。
+macOS 软件包采用 Universal 2 构建，同时支持 Apple Silicon 与 Intel Mac；Windows 提供 x64 版本，Linux 提供 x64 与 ARM64 版本。
 
 1. 打开 [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest)，下载对应平台的软件包。
 2. macOS 打开 DMG 后将 **Quantum Leap** 拖入 **Applications**；Windows 解压绿色版 ZIP 后直接运行 **Quantum Leap.exe**；Linux 可运行 AppImage 或安装 DEB 软件包。
@@ -89,7 +89,7 @@ Windows 绿色版、Linux AppImage 与 Linux DEB 作为未签名的正式 Releas
 
 ## 系统要求
 
-- macOS 13 Ventura 或更高版本、Windows 10/11 x64，或使用 glibc 的 Ubuntu/Debian x64/ARM64 桌面环境
+- Apple Silicon 或 Intel Mac 上的 macOS 13 Ventura 或更高版本、Windows 10/11 x64，或使用 glibc 的 Ubuntu/Debian x64/ARM64 桌面环境
 - Windows 需要 Microsoft Edge WebView2 Runtime；保持 Windows 10/11 为当前版本时通常已随系统提供
 - macOS 本机及所有远端设备建议安装 `iperf3` 3.12 或更高版本
 - Windows/Linux 本机测速默认使用安装包内置、固定源码版本的 `iperf3` 3.21 sidecar
@@ -118,6 +118,8 @@ npm run tauri:dev
 ```
 
 Linux/Windows 打包前分别运行 `npm run sidecar:linux` 或 `npm run sidecar:windows`。Linux 脚本会根据当前 x64 或 ARM64 宿主机原生构建 sidecar；Windows sidecar 构建需要 Cygwin 的 GCC、make、autoconf、automake 和 curl。生成的二进制与 DLL 位于被 Git 忽略的 `src-tauri/binaries/` 目录。
+
+使用 `npm run tauri:build:macos-universal` 构建同时支持 Apple Silicon 与 Intel 的 macOS Universal 2 应用；构建前需要同时安装 Rust 的 `aarch64-apple-darwin` 与 `x86_64-apple-darwin` target。
 
 验证命令：
 

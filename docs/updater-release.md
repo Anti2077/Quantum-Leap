@@ -12,23 +12,23 @@ Quantum Leap uses Tauri's updater signature in addition to the operating-system 
 
 For Linux, manually dispatch the **Cross-platform desktop builds** workflow from the release tag and enable `release_build`. The workflow signs the updater artifacts and includes each `.sig` file in its uploaded build artifact. The Windows job always produces an unsigned portable ZIP; Windows updates open the GitHub Release page instead of using Tauri's installer updater.
 
-Build the Apple Silicon macOS release in a logged-in GUI session with the updater key available outside the repository:
+Build the Universal 2 macOS release in a logged-in GUI session with the updater key available outside the repository. The resulting application contains both `arm64` and `x86_64` executables:
 
 ```sh
 TAURI_SIGNING_PRIVATE_KEY=~/.tauri/quantum-leap.key \
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
-  npm run tauri:build -- --bundles dmg --config src-tauri/tauri.updater.conf.json
+  npm run tauri:build:macos-universal -- --bundles app,dmg --config src-tauri/tauri.updater.conf.json
 ```
 
-This preserves the custom DMG layout and also creates the signed `.app.tar.gz` updater artifact. Verify the DMG and app bundle using the normal release checks before assembling the release.
+This preserves the custom DMG layout and also creates the signed `.app.tar.gz` updater artifact. Before assembling the release, verify the app's main executable with `lipo -archs` and require both `x86_64` and `arm64`; then complete the normal DMG, metadata, code-signature, and notarization checks.
 
 ## Assemble `latest.json`
 
 Place the final, renamed updater artifacts and matching `.sig` files in one directory. The required names for version `X.Y.Z` are:
 
 ```text
-Quantum-Leap_X.Y.Z_macOS_arm64.app.tar.gz
-Quantum-Leap_X.Y.Z_macOS_arm64.app.tar.gz.sig
+Quantum-Leap_X.Y.Z_macOS_universal.app.tar.gz
+Quantum-Leap_X.Y.Z_macOS_universal.app.tar.gz.sig
 Quantum-Leap_X.Y.Z_Linux_x86_64.AppImage
 Quantum-Leap_X.Y.Z_Linux_x86_64.AppImage.sig
 Quantum-Leap_X.Y.Z_Linux_aarch64.AppImage
@@ -43,6 +43,8 @@ npm run release:updater-manifest -- \
   --assets release \
   --notes docs/release-notes/vX.Y.Z.md
 ```
+
+The manifest publishes the same Universal 2 updater artifact for both Tauri targets, `darwin-aarch64` and `darwin-x86_64`, so existing Apple Silicon installations and Intel Macs follow the same signed update channel.
 
 Upload `latest.json`, updater artifacts, signatures, distribution packages (including `Quantum-Leap_X.Y.Z_Windows_x64_portable.zip`), and SHA-256 manifests to the same draft GitHub Release. Publish only after verifying that every URL in `latest.json` is publicly downloadable.
 

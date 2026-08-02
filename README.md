@@ -9,7 +9,7 @@
   <p>
     <a href="https://github.com/Anti2077/Quantum-Leap/releases/latest"><img src="https://img.shields.io/github/v/release/Anti2077/Quantum-Leap?display_name=tag&sort=semver" alt="Latest release"></a>
     <img src="https://img.shields.io/badge/macOS-13%2B-111111?logo=apple" alt="macOS 13 or later">
-    <img src="https://img.shields.io/badge/Apple_Silicon-arm64-111111?logo=apple" alt="Apple Silicon arm64">
+    <img src="https://img.shields.io/badge/Mac-Apple_Silicon_%2F_Intel-111111?logo=apple" alt="Apple Silicon and Intel Mac">
     <img src="https://img.shields.io/badge/Windows-10%2F11_x64-0078D4?logo=windows" alt="Windows 10 and 11 x64">
     <img src="https://img.shields.io/badge/Linux-x64%20%2F%20ARM64-FCC624?logo=linux&logoColor=111111" alt="Linux x64 and ARM64">
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0-only"></a>
@@ -65,7 +65,7 @@ The standard profile runs TCP with 8 streams, testing upload and download for 10
 
 ## Install
 
-The current public release is **Quantum Leap 1.4.1** for macOS ARM64, Windows x64, and Linux x64/ARM64.
+macOS packages are Universal 2 builds for Apple Silicon and Intel Macs. Windows is available for x64, and Linux is available for x64 and ARM64.
 
 1. Open [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest) and download the package for your platform.
 2. On macOS, open the DMG and drag **Quantum Leap** into **Applications**. On Windows, extract the portable ZIP and run **Quantum Leap.exe**. On Linux, use the AppImage or install the DEB package.
@@ -89,7 +89,7 @@ The chart counts distribution and in-app update packages downloaded from GitHub 
 
 ## Requirements
 
-- macOS 13 Ventura or later, Windows 10/11 x64, or an x64/ARM64 Ubuntu/Debian desktop using glibc
+- macOS 13 Ventura or later on Apple Silicon or Intel, Windows 10/11 x64, or an x64/ARM64 Ubuntu/Debian desktop using glibc
 - Windows requires the Microsoft Edge WebView2 Runtime, which is included with current Windows 10/11 updates
 - `iperf3` 3.12 or later is recommended on macOS and all remote devices
 - Windows and Linux local tests use a bundled, source-pinned `iperf3` 3.21 sidecar by default
@@ -118,6 +118,8 @@ npm run tauri:dev
 ```
 
 Before packaging on Linux or Windows, run `npm run sidecar:linux` or `npm run sidecar:windows`. The Linux script builds the sidecar for the native x64 or ARM64 host. The Windows sidecar build requires Cygwin with GCC, make, autoconf, automake, and curl. Generated binaries and DLLs are stored in the ignored `src-tauri/binaries/` directory.
+
+Build the macOS Universal 2 app for Apple Silicon and Intel with `npm run tauri:build:macos-universal`. Rust targets `aarch64-apple-darwin` and `x86_64-apple-darwin` must both be installed.
 
 Validation commands:
 
