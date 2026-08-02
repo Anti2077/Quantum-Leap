@@ -181,6 +181,10 @@ async function performCheck() {
       });
       return;
     }
+    if (installMode === "externalDownload") {
+      publishAvailableFromRelease(currentVersion, latestRelease);
+      return;
+    }
   } catch {
     // The signed updater endpoint remains usable when GitHub's API is unavailable.
   }

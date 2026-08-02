@@ -14,15 +14,15 @@ const MAX_RELEASES = 12;
 const COPY = {
   en: {
     title: "Release downloads",
-    subtitle: "Install and update packages downloaded from GitHub Releases",
+    subtitle: "Distribution and update packages downloaded from GitHub Releases",
     total: "TOTAL PACKAGE DOWNLOADS",
     empty: "No package downloads yet"
   },
   zh: {
     title: "Release 下载量",
-    subtitle: "GitHub Releases 中安装包与应用内更新包的下载次数",
-    total: "安装包累计下载",
-    empty: "暂无安装包下载"
+    subtitle: "GitHub Releases 中发布包与应用内更新包的下载次数",
+    total: "发布包累计下载",
+    empty: "暂无发布包下载"
   }
 };
 
@@ -52,7 +52,12 @@ const THEMES = {
 export function classifyPackage(name) {
   const lower = name.toLowerCase();
   if (lower.endsWith(".dmg") || lower.endsWith(".app.tar.gz")) return "macos";
-  if (lower.endsWith(".exe") || lower.endsWith(".msi") || lower.endsWith(".nsis.zip")) return "windows";
+  if (
+    lower.endsWith(".exe")
+    || lower.endsWith(".msi")
+    || lower.endsWith(".nsis.zip")
+    || (lower.includes("windows") && lower.endsWith(".zip"))
+  ) return "windows";
   if (lower.endsWith(".appimage") || lower.endsWith(".deb") || lower.endsWith(".rpm")) return "linux";
   return null;
 }

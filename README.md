@@ -68,18 +68,18 @@ The standard profile runs TCP with 8 streams, testing upload and download for 10
 The current public release is **Quantum Leap 1.4.1** for macOS ARM64, Windows x64, and Linux x64/ARM64.
 
 1. Open [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest) and download the package for your platform.
-2. On macOS, open the DMG and drag **Quantum Leap** into **Applications**. On Windows, run the NSIS installer. On Linux, use the AppImage or install the DEB package.
-3. macOS and remote devices must provide `iperf3`; Windows and Linux local tests use the bundled `iperf3` sidecar by default.
+2. On macOS, open the DMG and drag **Quantum Leap** into **Applications**. On Windows, extract the portable ZIP and run **Quantum Leap.exe**. On Linux, use the AppImage or install the DEB package.
+3. Keep all files in the Windows portable folder together. macOS and remote devices must provide `iperf3`; Windows and Linux local tests use the bundled `iperf3` sidecar by default.
 
-Version 1.4.1 introduces signed in-app update delivery for future releases on macOS, Windows, and Linux AppImage installations. Linux DEB installations open the Release page so package-manager files are not replaced directly. Because this is the updater bootstrap release, existing installations must install 1.4.1 manually once.
+Version 1.4.1 introduced signed in-app update delivery. Current macOS and Linux AppImage builds install signed updates in the app. Windows portable and Linux DEB builds open the Release page so managed or in-use files are not replaced directly. Existing Windows installer users must download the portable ZIP manually once when moving to the portable distribution.
 
 The public macOS build is ad-hoc signed and is not notarized with Apple Developer ID. If macOS blocks the first launch, right-click the app in Finder and choose **Open**, or allow it under **System Settings -> Privacy & Security**. The Release also includes a SHA-256 checksum file.
 
-Windows NSIS, Linux AppImage, and Linux DEB packages are published as unsigned Release assets. Windows may show a SmartScreen warning; verify downloads against the attached SHA-256 manifest before installing.
+Windows portable, Linux AppImage, and Linux DEB packages are published as unsigned Release assets. Windows may show a SmartScreen warning; verify downloads against the attached SHA-256 manifest before running the app.
 
 ### Download statistics
 
-The chart counts installation and in-app update packages downloaded from GitHub Releases. Signature, checksum, and metadata files are excluded.
+The chart counts distribution and in-app update packages downloaded from GitHub Releases. Signature, checksum, and metadata files are excluded.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/readme/downloads-en-dark.svg">
@@ -90,6 +90,7 @@ The chart counts installation and in-app update packages downloaded from GitHub 
 ## Requirements
 
 - macOS 13 Ventura or later, Windows 10/11 x64, or an x64/ARM64 Ubuntu/Debian desktop using glibc
+- Windows requires the Microsoft Edge WebView2 Runtime, which is included with current Windows 10/11 updates
 - `iperf3` 3.12 or later is recommended on macOS and all remote devices
 - Windows and Linux local tests use a bundled, source-pinned `iperf3` 3.21 sidecar by default
 - Linux credential storage requires a desktop Secret Service provider

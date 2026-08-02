@@ -71,6 +71,7 @@ import {
   type RemoteClientForm
 } from "../features/speed-test/form-model";
 import {
+  applyReceiverSummary,
   summarizeSamples,
   type SamplePoint
 } from "../features/speed-test/results-model";
@@ -363,7 +364,8 @@ export function SpeedWorkbench() {
           serverBindIp: "198.51.100.20",
           username: "operator",
           password: "preview-password",
-          testMode: advancedPreview ? "advanced" : initialForm.testMode
+          testMode: advancedPreview ? "advanced" : initialForm.testMode,
+          protocol: advancedPreview ? "udp" : initialForm.protocol
         }
       : initialForm
   );
@@ -387,6 +389,7 @@ export function SpeedWorkbench() {
   const {
     samples,
     latest,
+    summaries,
     prompt,
     status,
     setStatus,
@@ -430,7 +433,20 @@ export function SpeedWorkbench() {
         ? { phase: "completed", message: t("previewComplete") }
         : { phase: "running", message: t("previewRunning") }
       : { phase: "idle", message: t("waitingForServer") },
-    lastGood: {}
+    lastGood: {},
+    summaries: advancedPreview && resultPreview
+      ? {
+          upload: {
+            bandwidthBps: 942_000_000,
+            bytes: 1_177_500_000,
+            jitterMs: 0.42,
+            lostPackets: 580,
+            packets: 91_240,
+            lostPercent: 0.64,
+            direction: "upload"
+          }
+        }
+      : {}
   }));
   const [savedServers, setSavedServers] = useState<SavedServer[]>(() =>
     designPreviewTheme
@@ -607,7 +623,9 @@ export function SpeedWorkbench() {
   const uploadStats = useMemo(() => summarizeSamples(samples, "upload"), [samples]);
   const downloadStats = useMemo(() => summarizeSamples(samples, "download"), [samples]);
   const overallStats = useMemo(() => summarizeSamples(samples), [samples]);
-  const activeStats = activeDirection === "upload" ? uploadStats : downloadStats;
+  const sampledActiveStats = activeDirection === "upload" ? uploadStats : downloadStats;
+  const receiverSummary = summaries[activeDirection];
+  const activeStats = applyReceiverSummary(sampledActiveStats, receiverSummary);
   const totalBytes = uploadStats.bytes + downloadStats.bytes;
   const displayedRetransmits = standard ? overallStats.retransmits : activeStats.retransmits;
   const retransmitWarning = protocol === "tcp" && status.phase === "completed" && displayedRetransmits >= 100;
@@ -620,9 +638,11 @@ export function SpeedWorkbench() {
       : 1.18e9
     : previewDirection
       ? 1e9
-    : completedStandard
-      ? downloadStats.average
-      : (latest?.bandwidthBps ?? 0);
+      : receiverSummary
+        ? receiverSummary.bandwidthBps
+        : completedStandard
+          ? downloadStats.average
+          : (latest?.bandwidthBps ?? 0);
   const rate = useMemo(
     () => formatBandwidthParts(displayedBps, bandwidthUnit),
     [bandwidthUnit, displayedBps]
@@ -1872,6 +1892,7 @@ export function SpeedWorkbench() {
           downloadStats={downloadStats}
           overallStats={overallStats}
           activeStats={activeStats}
+          receiverSummary={receiverSummary}
           totalBytes={totalBytes}
           retransmitWarning={retransmitWarning}
           displayedStatusMessage={displayedStatusMessage}

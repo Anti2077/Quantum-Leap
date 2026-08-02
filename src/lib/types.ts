@@ -54,6 +54,16 @@ export interface SpeedSample {
   direction: TransferDirection;
 }
 
+export interface SpeedSummary {
+  bandwidthBps: number;
+  bytes: number;
+  jitterMs?: number | null;
+  lostPackets?: number | null;
+  packets?: number | null;
+  lostPercent?: number | null;
+  direction: TransferDirection;
+}
+
 export interface SpeedStateEvent {
   phase: "idle" | "starting" | "confirming" | "running" | "stopping" | "completed" | "cancelled" | "failed";
   message: string;

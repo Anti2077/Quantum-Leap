@@ -55,7 +55,6 @@ async function main() {
 
   const assets = {
     "darwin-aarch64": `Quantum-Leap_${version}_macOS_arm64.app.tar.gz`,
-    "windows-x86_64": `Quantum-Leap_${version}_Windows_x64-setup.exe`,
     "linux-x86_64": `Quantum-Leap_${version}_Linux_x86_64.AppImage`,
     "linux-aarch64": `Quantum-Leap_${version}_Linux_aarch64.AppImage`
   };

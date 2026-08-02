@@ -359,6 +359,18 @@ pub struct SpeedSampleEvent {
     pub direction: TransferDirection,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeedSummaryEvent {
+    pub bandwidth_bps: f64,
+    pub bytes: u64,
+    pub jitter_ms: Option<f64>,
+    pub lost_packets: Option<u64>,
+    pub packets: Option<u64>,
+    pub lost_percent: Option<f64>,
+    pub direction: TransferDirection,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,6 +415,15 @@ mod tests {
             message: "message".into(),
             detail: None,
         };
+        let summary = SpeedSummaryEvent {
+            bandwidth_bps: 950_000_000.0,
+            bytes: 1_187_500_000,
+            jitter_ms: Some(0.4),
+            lost_packets: Some(10),
+            packets: Some(1_000),
+            lost_percent: Some(1.0),
+            direction: TransferDirection::Upload,
+        };
 
         assert_eq!(
             serde_json::to_value(state).expect("state should serialize")["phase"],
@@ -412,6 +433,10 @@ mod tests {
             serde_json::to_value(prompt).expect("prompt should serialize")["kind"],
             "clientHostKeyMismatch"
         );
+        let summary = serde_json::to_value(summary).expect("summary should serialize");
+        assert_eq!(summary["bandwidthBps"], 950_000_000.0);
+        assert_eq!(summary["lostPercent"], 1.0);
+        assert_eq!(summary["direction"], "upload");
     }
 
     #[test]

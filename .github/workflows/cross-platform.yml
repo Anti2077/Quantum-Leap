@@ -206,47 +206,91 @@ jobs:
         run: |
           $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notlike 'C:\tools\cygwin\bin*' }) -join ';'
           cargo clippy --manifest-path src-tauri/Cargo.toml --locked -- -D warnings
-      - name: Build NSIS installer
-        if: github.event_name != 'workflow_dispatch' || inputs.release_build != true
+      - name: Build portable Windows executable
         shell: pwsh
         run: |
           $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notlike 'C:\tools\cygwin\bin*' }) -join ';'
-          npm run tauri:build -- --bundles nsis
-      - name: Build signed NSIS release artifact
-        if: github.event_name == 'workflow_dispatch' && inputs.release_build == true
-        shell: pwsh
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-        run: |
-          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "TAURI_SIGNING_PRIVATE_KEY is not configured" }
-          $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notlike 'C:\tools\cygwin\bin*' }) -join ';'
-          npm run tauri:build -- --bundles nsis --config src-tauri/tauri.updater.conf.json
-      - name: Inspect Windows installer
+          npm run tauri:build -- --no-bundle
+      - name: Package and inspect portable Windows build
         shell: pwsh
         run: |
-          $Installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
-          $Extract = Join-Path $env:RUNNER_TEMP "quantum-leap-nsis"
-          New-Item -ItemType Directory -Force -Path $Extract | Out-Null
-          7z x $Installer.FullName "-o$Extract" -y | Out-Null
-          Get-ChildItem $Extract -Recurse -Filter *.7z | ForEach-Object {
-            7z x $_.FullName "-o$Extract\payload" -y | Out-Null
+          $Version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $PortableName = "Quantum-Leap_${Version}_Windows_x64_portable"
+          $BundleRoot = "src-tauri/target/release/bundle/portable"
+          $PortableDir = Join-Path $BundleRoot $PortableName
+          $Archive = Join-Path $BundleRoot "${PortableName}.zip"
+          $App = Join-Path $PortableDir "Quantum Leap.exe"
+
+          New-Item -ItemType Directory -Force -Path (Join-Path $PortableDir "third-party") | Out-Null
+          Copy-Item "src-tauri/target/release/iperf3_ui.exe" $App
+          Copy-Item "src-tauri/binaries/iperf3-x86_64-pc-windows-msvc.exe" (Join-Path $PortableDir "iperf3.exe")
+          Copy-Item "src-tauri/binaries/*.dll" $PortableDir
+          Copy-Item "src-tauri/binaries/licenses/*" (Join-Path $PortableDir "third-party")
+          Copy-Item -Path "LICENSE", "THIRD_PARTY_NOTICES.md" -Destination $PortableDir
+
+          $RequiredFiles = @(
+            "Quantum Leap.exe",
+            "iperf3.exe",
+            "cygwin1.dll",
+            "LICENSE",
+            "THIRD_PARTY_NOTICES.md",
+            "third-party/iperf3-LICENSE",
+            "third-party/cygwin-LICENSE"
+          )
+          foreach ($RelativePath in $RequiredFiles) {
+            if (-not (Test-Path -PathType Leaf (Join-Path $PortableDir $RelativePath))) {
+              throw "Portable package is missing $RelativePath"
+            }
           }
-          $Files = Get-ChildItem $Extract -Recurse -File | ForEach-Object { $_.FullName }
-          if (-not ($Files | Where-Object { $_ -match "iperf3\.exe$" })) { throw "NSIS installer does not contain iperf3" }
-          if (-not ($Files | Where-Object { $_ -match "cygwin1\.dll$" })) { throw "NSIS installer does not contain cygwin1.dll" }
-          if (-not ($Files | Where-Object { $_ -match "iperf3-LICENSE$" })) { throw "NSIS installer does not contain the iperf3 license" }
-          if (-not ($Files | Where-Object { $_ -match "cygwin-LICENSE$" })) { throw "NSIS installer does not contain the Cygwin license" }
-          if (-not ($Files | Where-Object { (Split-Path $_ -Leaf) -eq "LICENSE" })) { throw "NSIS installer does not contain the application license" }
-          if (-not ($Files | Where-Object { $_ -match "THIRD_PARTY_NOTICES\.md$" })) { throw "NSIS installer does not contain third-party notices" }
-          $Hash = Get-FileHash -Algorithm SHA256 $Installer.FullName
-          "$($Hash.Hash.ToLowerInvariant())  $($Installer.Name)" | Set-Content -Encoding ascii src-tauri/target/release/bundle/SHA256SUMS-windows-x64.txt
+
+          function Get-PeMachine([string]$Path) {
+            $Bytes = [System.IO.File]::ReadAllBytes($Path)
+            if ($Bytes.Length -lt 64 -or $Bytes[0] -ne 0x4d -or $Bytes[1] -ne 0x5a) {
+              throw "$Path is not a valid PE file"
+            }
+            $PeOffset = [BitConverter]::ToInt32($Bytes, 0x3c)
+            if ($PeOffset -lt 0 -or $PeOffset + 6 -gt $Bytes.Length) {
+              throw "$Path has an invalid PE header"
+            }
+            return [BitConverter]::ToUInt16($Bytes, $PeOffset + 4)
+          }
+
+          Get-ChildItem $PortableDir -File | Where-Object { $_.Extension -in ".exe", ".dll" } | ForEach-Object {
+            if ((Get-PeMachine $_.FullName) -ne 0x8664) {
+              throw "$($_.Name) is not an x64 executable"
+            }
+          }
+          if ((Get-Item $App).VersionInfo.ProductName -ne "Quantum Leap") {
+            throw "Portable application metadata has an unexpected product name"
+          }
+
+          $Process = Start-Process -FilePath $App -PassThru
+          try {
+            Start-Sleep -Seconds 5
+            if ($Process.HasExited) { throw "Portable application exited during the launch check" }
+          } finally {
+            if (-not $Process.HasExited) { Stop-Process -Id $Process.Id -Force }
+          }
+
+          Compress-Archive -Path $PortableDir -DestinationPath $Archive -CompressionLevel Optimal
+          $Extract = Join-Path $env:RUNNER_TEMP "quantum-leap-portable"
+          Expand-Archive -Path $Archive -DestinationPath $Extract
+          $ArchivedApp = Join-Path (Join-Path $Extract $PortableName) "Quantum Leap.exe"
+          if (-not (Test-Path -PathType Leaf $ArchivedApp)) {
+            throw "Portable archive has an unexpected directory layout"
+          }
+          if ((Get-FileHash -Algorithm SHA256 $ArchivedApp).Hash -ne (Get-FileHash -Algorithm SHA256 $App).Hash) {
+            throw "Portable archive changed the application executable"
+          }
+
+          $Hash = Get-FileHash -Algorithm SHA256 $Archive
+          "$($Hash.Hash.ToLowerInvariant())  $([System.IO.Path]::GetFileName($Archive))" |
+            Set-Content -Encoding ascii "src-tauri/target/release/bundle/SHA256SUMS-windows-x64.txt"
       - uses: actions/upload-artifact@v4
         with:
           name: quantum-leap-windows-x64-${{ github.sha }}
           retention-days: 14
           if-no-files-found: error
           path: |
-            src-tauri/target/release/bundle/nsis/*-setup.exe
-            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+            src-tauri/target/release/bundle/portable/*_portable.zip
             src-tauri/target/release/bundle/SHA256SUMS-windows-x64.txt

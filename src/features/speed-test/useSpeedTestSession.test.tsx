@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@tauri-apps/api/event";
-import type { SpeedSample } from "../../lib/types";
+import type { SpeedSample, SpeedSummary } from "../../lib/types";
 import { useSpeedTestSession } from "./useSpeedTestSession";
 
 const listeners = new Map<string, (event: Event<unknown>) => void>();
@@ -29,10 +29,11 @@ describe("useSpeedTestSession", () => {
         latest: null,
         prompt: null,
         status: { phase: "idle", message: "idle" },
-        lastGood: {}
+        lastGood: {},
+        summaries: {}
       }))
     );
-    await waitFor(() => expect(listeners.size).toBe(3));
+    await waitFor(() => expect(listeners.size).toBe(4));
 
     const sample: SpeedSample = {
       elapsed: 0.5,
@@ -41,6 +42,14 @@ describe("useSpeedTestSession", () => {
       direction: "download"
     };
     act(() => listeners.get("speed://sample")?.({ payload: sample } as Event<unknown>));
+    const summary: SpeedSummary = {
+      bandwidthBps: 900_000,
+      bytes: 112_500,
+      jitterMs: 0.2,
+      lostPercent: 1.5,
+      direction: "download"
+    };
+    act(() => listeners.get("speed://summary")?.({ payload: summary } as Event<unknown>));
     act(() =>
       listeners.get("speed://state")?.({
         payload: { phase: "running", message: "running" }
@@ -49,6 +58,7 @@ describe("useSpeedTestSession", () => {
 
     expect(result.current.latest).toEqual(sample);
     expect(result.current.samples).toHaveLength(1);
+    expect(result.current.summaries.download).toEqual(summary);
     expect(result.current.status.phase).toBe("running");
 
     unmount();

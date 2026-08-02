@@ -16,17 +16,11 @@
     ]
   },
   "bundle": {
-    "targets": ["nsis"],
+    "active": false,
     "externalBin": ["binaries/iperf3"],
     "resources": {
       "binaries/*.dll": "",
       "binaries/licenses/*": "third-party/"
-    },
-    "windows": {
-      "webviewInstallMode": {
-        "type": "downloadBootstrapper",
-        "silent": true
-      }
     }
   }
 }

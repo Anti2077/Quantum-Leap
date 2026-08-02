@@ -1,4 +1,4 @@
-use crate::model::{SpeedSampleEvent, TransferDirection};
+use crate::model::{SpeedSampleEvent, SpeedSummaryEvent, TransferDirection};
 use serde_json::Value;
 
 pub(super) fn add_tcp_latency_jitter(
@@ -105,6 +105,74 @@ pub(super) fn parse_sample(line: &str, direction: TransferDirection) -> Option<S
         latency_ms,
         jitter_ms,
         retransmits,
+        direction,
+    })
+}
+
+fn finite_non_negative(value: &Value, key: &str) -> Option<f64> {
+    value
+        .get(key)
+        .and_then(Value::as_f64)
+        .filter(|number| number.is_finite() && *number >= 0.0)
+}
+
+pub(super) fn parse_udp_receiver_summary(
+    line: &str,
+    direction: TransferDirection,
+    parallel_streams: u8,
+) -> Option<SpeedSummaryEvent> {
+    if let Ok(root) = serde_json::from_str::<Value>(line) {
+        if root.get("event").and_then(Value::as_str) != Some("end") {
+            return None;
+        }
+        let data = root.get("data")?;
+        let summary = data.get("sum_received").or_else(|| {
+            data.get("sum")
+                .filter(|sum| sum.get("sender").and_then(Value::as_bool) == Some(false))
+        })?;
+        let bandwidth_bps = finite_non_negative(summary, "bits_per_second")?;
+        return Some(SpeedSummaryEvent {
+            bandwidth_bps,
+            bytes: summary
+                .get("bytes")
+                .and_then(Value::as_u64)
+                .unwrap_or_default(),
+            jitter_ms: finite_non_negative(summary, "jitter_ms"),
+            lost_packets: summary.get("lost_packets").and_then(Value::as_u64),
+            packets: summary.get("packets").and_then(Value::as_u64),
+            lost_percent: finite_non_negative(summary, "lost_percent"),
+            direction,
+        });
+    }
+
+    let trimmed = line.trim_end();
+    if !trimmed.ends_with("receiver") {
+        return None;
+    }
+    let sample = parse_text_sample(trimmed, direction, parallel_streams)?;
+    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+    let (lost_packets, packets) = tokens
+        .iter()
+        .find_map(|token| {
+            let (lost, total) = token.split_once('/')?;
+            Some((lost.parse::<u64>().ok()?, total.parse::<u64>().ok()?))
+        })
+        .map_or((None, None), |(lost, total)| (Some(lost), Some(total)));
+    let lost_percent = tokens.iter().find_map(|token| {
+        token
+            .strip_prefix('(')
+            .and_then(|value| value.strip_suffix("%)"))
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value >= 0.0)
+    });
+
+    Some(SpeedSummaryEvent {
+        bandwidth_bps: sample.bandwidth_bps,
+        bytes: sample.bytes,
+        jitter_ms: sample.jitter_ms,
+        lost_packets,
+        packets,
+        lost_percent,
         direction,
     })
 }

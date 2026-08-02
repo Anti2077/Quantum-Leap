@@ -68,18 +68,18 @@ Quantum Leap 将 SSH 远程编排、`iperf3` 测速和实时可视化整合在�
 当前公开 Release 是面向 macOS ARM64、Windows x64 与 Linux x64/ARM64 的 **Quantum Leap 1.4.1**。
 
 1. 打开 [Releases](https://github.com/Anti2077/Quantum-Leap/releases/latest)，下载对应平台的软件包。
-2. macOS 打开 DMG 后将 **Quantum Leap** 拖入 **Applications**；Windows 运行 NSIS 安装程序；Linux 可运行 AppImage 或安装 DEB 软件包。
-3. macOS 与远端设备需要自行提供 `iperf3`；Windows/Linux 本机测速默认使用安装包内置的 `iperf3` sidecar。
+2. macOS 打开 DMG 后将 **Quantum Leap** 拖入 **Applications**；Windows 解压绿色版 ZIP 后直接运行 **Quantum Leap.exe**；Linux 可运行 AppImage 或安装 DEB 软件包。
+3. Windows 绿色版目录内的文件需要放在一起。macOS 与远端设备需要自行提供 `iperf3`；Windows/Linux 本机测速默认使用软件包内置的 `iperf3` sidecar。
 
-1.4.1 为 macOS、Windows 与 Linux AppImage 引入后续版本的签名应用内更新；Linux DEB 会打开 Release 页面，避免直接替换包管理器维护的文件。由于 1.4.1 是更新器引导版本，现有用户仍需手动安装一次。
+1.4.1 首次引入了签名应用内更新。当前 macOS 与 Linux AppImage 会在应用内安装签名更新；Windows 绿色版与 Linux DEB 会打开 Release 页面，避免直接替换正在使用或由包管理器维护的文件。原 Windows 安装版用户切换到绿色版时，需要手动下载一次绿色版 ZIP。
 
 当前公开 macOS 构建使用 ad-hoc 签名，尚未通过 Apple Developer ID 公证。macOS 首次启动若阻止运行，请在 Finder 中右键应用并选择**打开**，或前往**系统设置 -> 隐私与安全性**确认打开。Release 同时提供 SHA-256 校验文件。
 
-Windows NSIS、Linux AppImage 与 Linux DEB 作为未签名的正式 Release 附件发布。Windows 可能出现 SmartScreen 提示，安装前请使用随 Release 提供的 SHA-256 清单校验下载文件。
+Windows 绿色版、Linux AppImage 与 Linux DEB 作为未签名的正式 Release 附件发布。Windows 可能出现 SmartScreen 提示，运行前请使用随 Release 提供的 SHA-256 清单校验下载文件。
 
 ### 下载量统计
 
-图表统计 GitHub Releases 中安装包与应用内更新包的下载次数，不包含签名、校验和元数据文件。
+图表统计 GitHub Releases 中各平台发布包与应用内更新包的下载次数，不包含签名、校验和元数据文件。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/readme/downloads-zh-dark.svg">
@@ -90,6 +90,7 @@ Windows NSIS、Linux AppImage 与 Linux DEB 作为未签名的正式 Release 附
 ## 系统要求
 
 - macOS 13 Ventura 或更高版本、Windows 10/11 x64，或使用 glibc 的 Ubuntu/Debian x64/ARM64 桌面环境
+- Windows 需要 Microsoft Edge WebView2 Runtime；保持 Windows 10/11 为当前版本时通常已随系统提供
 - macOS 本机及所有远端设备建议安装 `iperf3` 3.12 或更高版本
 - Windows/Linux 本机测速默认使用安装包内置、固定源码版本的 `iperf3` 3.21 sidecar
 - Linux 保存敏感凭据需要桌面环境提供 Secret Service

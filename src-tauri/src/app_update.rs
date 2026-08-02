@@ -11,7 +11,7 @@ pub enum UpdateInstallMode {
 
 fn can_install_update_for(platform: &str, appimage: Option<&OsStr>) -> bool {
     match platform {
-        "macos" | "windows" => true,
+        "macos" => true,
         "linux" => appimage.is_some_and(|value| !value.is_empty()),
         _ => false,
     }
@@ -34,9 +34,9 @@ mod tests {
     use super::can_install_update_for;
 
     #[test]
-    fn native_installers_support_in_app_updates() {
+    fn platform_install_modes_are_selected_correctly() {
         assert!(can_install_update_for("macos", None));
-        assert!(can_install_update_for("windows", None));
+        assert!(!can_install_update_for("windows", None));
     }
 
     #[test]

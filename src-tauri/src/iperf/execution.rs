@@ -1,7 +1,9 @@
 #[cfg(test)]
 use super::latency::parse_ping_latency;
 #[cfg(test)]
-use super::parser::{add_tcp_latency_jitter, parse_sample, parse_text_sample};
+use super::parser::{
+    add_tcp_latency_jitter, parse_sample, parse_text_sample, parse_udp_receiver_summary,
+};
 use crate::model::{ServerMode, SpeedTestRequest, TransferDirection, TransportProtocol};
 use crate::ssh::SshError;
 use serde_json::Value;
@@ -443,6 +445,42 @@ mod tests {
         let sample = parse_sample(line, TransferDirection::Upload).expect("interval sample");
 
         assert_eq!(sample.bandwidth_bps, 600_000_000.0);
+    }
+
+    #[test]
+    fn parses_udp_receiver_summary_from_json_stream_end() {
+        let line = r#"{"event":"end","data":{"sum":{"bytes":2000000000,"bits_per_second":8000000000.0,"sender":true},"sum_sent":{"bytes":2000000000,"bits_per_second":8000000000.0,"sender":true},"sum_received":{"bytes":237500000,"bits_per_second":950000000.0,"jitter_ms":0.42,"lost_packets":176250,"packets":200000,"lost_percent":88.125,"sender":false}}}"#;
+        let summary = parse_udp_receiver_summary(line, TransferDirection::Upload, 8)
+            .expect("receiver summary");
+
+        assert_eq!(summary.bandwidth_bps, 950_000_000.0);
+        assert_eq!(summary.bytes, 237_500_000);
+        assert_eq!(summary.jitter_ms, Some(0.42));
+        assert_eq!(summary.lost_packets, Some(176_250));
+        assert_eq!(summary.packets, Some(200_000));
+        assert_eq!(summary.lost_percent, Some(88.125));
+        assert_eq!(summary.direction, TransferDirection::Upload);
+    }
+
+    #[test]
+    fn does_not_treat_udp_sender_summary_as_received_throughput() {
+        let line = r#"{"event":"end","data":{"sum":{"bytes":2000000000,"bits_per_second":8000000000.0,"sender":true}}}"#;
+
+        assert!(parse_udp_receiver_summary(line, TransferDirection::Upload, 8).is_none());
+    }
+
+    #[test]
+    fn parses_udp_receiver_summary_from_legacy_text() {
+        let line = "[SUM]   0.00-10.00  sec  1.10 GBytes  944 Mbits/sec  0.123 ms  756/8456 (8.9%)  receiver";
+        let summary = parse_udp_receiver_summary(line, TransferDirection::Upload, 8)
+            .expect("legacy receiver summary");
+
+        assert_eq!(summary.bandwidth_bps, 944_000_000.0);
+        assert_eq!(summary.bytes, 1_100_000_000);
+        assert_eq!(summary.jitter_ms, Some(0.123));
+        assert_eq!(summary.lost_packets, Some(756));
+        assert_eq!(summary.packets, Some(8_456));
+        assert_eq!(summary.lost_percent, Some(8.9));
     }
 
     #[test]

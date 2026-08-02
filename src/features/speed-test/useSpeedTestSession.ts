@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useReducer, type Dispatch, type SetStateAction } from "react";
-import type { SpeedPromptEvent, SpeedSample, SpeedStateEvent } from "../../lib/types";
+import type { SpeedPromptEvent, SpeedSample, SpeedStateEvent, SpeedSummary } from "../../lib/types";
 import {
   speedSessionReducer,
   type SpeedSessionAction,
@@ -32,6 +32,7 @@ export function useSpeedTestSession(initialState: () => SpeedSessionState): Spee
     };
 
     register<SpeedSample>("speed://sample", (sample) => ({ type: "sampleReceived", sample }));
+    register<SpeedSummary>("speed://summary", (summary) => ({ type: "summaryReceived", summary }));
     register<SpeedStateEvent>("speed://state", (status) => ({ type: "stateReceived", status }));
     register<SpeedPromptEvent>("speed://prompt", (prompt) => ({ type: "promptReceived", prompt }));
 

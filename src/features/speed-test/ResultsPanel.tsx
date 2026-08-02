@@ -10,7 +10,12 @@ import { LocalDeviceGlyph } from "../../components/LocalDeviceGlyph";
 import { NumberTicker } from "../../components/NumberTicker";
 import { formatBandwidth, formatBytes, formatLatency, type BandwidthUnit } from "../../lib/format";
 import type { TranslationKey } from "../../lib/i18n";
-import type { SpeedStateEvent, TransferDirection, TransportProtocol } from "../../lib/types";
+import type {
+  SpeedStateEvent,
+  SpeedSummary,
+  TransferDirection,
+  TransportProtocol
+} from "../../lib/types";
 import type { SamplePoint, SampleSummary } from "./results-model";
 import { STANDARD_PARALLEL_STREAMS } from "./form-model";
 
@@ -42,6 +47,7 @@ interface ResultsPanelProps {
   downloadStats: SampleSummary;
   overallStats: SampleSummary;
   activeStats: SampleSummary;
+  receiverSummary?: SpeedSummary;
   totalBytes: number;
   retransmitWarning: boolean;
   displayedStatusMessage: string;
@@ -88,6 +94,7 @@ export function ResultsPanel(props: ResultsPanelProps) {
     downloadStats,
     overallStats,
     activeStats,
+    receiverSummary,
     totalBytes,
     retransmitWarning,
     displayedStatusMessage
@@ -108,9 +115,13 @@ export function ResultsPanel(props: ResultsPanelProps) {
             <h2>
               {completedStandard
                 ? t("combinedResults")
-                : activeDirection === "upload"
-                  ? t("uploadSpeed")
-                  : t("downloadSpeed")}
+                : protocol === "udp" && activeDirection === "upload"
+                  ? receiverSummary
+                    ? t("udpReceivedRate")
+                    : t("udpSendRate")
+                  : activeDirection === "upload"
+                    ? t("uploadSpeed")
+                    : t("downloadSpeed")}
             </h2>
           </div>
           <div className="stage-heading-controls">
@@ -165,7 +176,11 @@ export function ResultsPanel(props: ResultsPanelProps) {
                   {t("downloadRating")} · <strong>{t(rating.labelKey)}</strong>
                 </motion.span>
               ) : (
-                <span className="sample-count">{t("sampleCount", { count: samples.length })}</span>
+                <span className="sample-count">
+                  {protocol === "udp" && activeDirection === "upload"
+                    ? t("senderSampleCount", { count: samples.length })
+                    : t("sampleCount", { count: samples.length })}
+                </span>
               )}
             </div>
             <NumberTicker value={rate.value} suffix={rate.unit} />
@@ -199,12 +214,38 @@ export function ResultsPanel(props: ResultsPanelProps) {
           </>
         ) : (
           <>
-            <div className="metric-cell"><span>{t("averageSpeed")}</span><strong>{formatBandwidth(activeStats.average, bandwidthUnit)}</strong></div>
-            <div className="metric-cell"><span>{t("peak")}</span><strong>{formatBandwidth(activeStats.peak, bandwidthUnit)}</strong></div>
+            <div className="metric-cell">
+              <span>
+                {receiverSummary
+                  ? t("receiverAverage")
+                  : protocol === "udp" && activeDirection === "upload"
+                    ? t("senderAverage")
+                    : t("averageSpeed")}
+              </span>
+              <strong>{formatBandwidth(activeStats.average, bandwidthUnit)}</strong>
+            </div>
+            <div className="metric-cell">
+              <span>{protocol === "udp" ? t("packetLoss") : t("peak")}</span>
+              <strong>
+                {protocol === "udp"
+                  ? receiverSummary?.lostPercent == null
+                    ? "--"
+                    : `${receiverSummary.lostPercent.toFixed(1)}%`
+                  : formatBandwidth(activeStats.peak, bandwidthUnit)}
+              </strong>
+            </div>
             <div className="metric-cell"><span>{t("loadedLatency")}</span><strong>{formatLatency(activeStats.latency)}</strong></div>
             <div className="metric-cell"><span>{protocol === "udp" ? t("udpJitter") : t("rttVariation")}</span><strong>{formatLatency(activeStats.jitter)}</strong></div>
             <div className={`metric-cell ${retransmitWarning ? "quality-warning" : ""}`}>
-              <span>{protocol === "tcp" ? t("transferRetransmits") : t("transferred")}</span>
+              <span>
+                {protocol === "tcp"
+                  ? t("transferRetransmits")
+                  : receiverSummary
+                    ? t("received")
+                    : activeDirection === "upload"
+                      ? t("sent")
+                      : t("transferred")}
+              </span>
               <strong>{protocol === "tcp" ? `${formatBytes(activeStats.bytes)} / ${activeStats.retransmits}` : formatBytes(activeStats.bytes)}</strong>
             </div>
           </>

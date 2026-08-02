@@ -10,7 +10,7 @@ Quantum Leap uses Tauri's updater signature in addition to the operating-system 
 
 ## Build release artifacts
 
-For Linux and Windows, manually dispatch the **Cross-platform desktop builds** workflow from the release tag and enable `release_build`. The workflow signs the updater artifacts and includes each `.sig` file in its uploaded build artifact.
+For Linux, manually dispatch the **Cross-platform desktop builds** workflow from the release tag and enable `release_build`. The workflow signs the updater artifacts and includes each `.sig` file in its uploaded build artifact. The Windows job always produces an unsigned portable ZIP; Windows updates open the GitHub Release page instead of using Tauri's installer updater.
 
 Build the Apple Silicon macOS release in a logged-in GUI session with the updater key available outside the repository:
 
@@ -29,8 +29,6 @@ Place the final, renamed updater artifacts and matching `.sig` files in one dire
 ```text
 Quantum-Leap_X.Y.Z_macOS_arm64.app.tar.gz
 Quantum-Leap_X.Y.Z_macOS_arm64.app.tar.gz.sig
-Quantum-Leap_X.Y.Z_Windows_x64-setup.exe
-Quantum-Leap_X.Y.Z_Windows_x64-setup.exe.sig
 Quantum-Leap_X.Y.Z_Linux_x86_64.AppImage
 Quantum-Leap_X.Y.Z_Linux_x86_64.AppImage.sig
 Quantum-Leap_X.Y.Z_Linux_aarch64.AppImage
@@ -46,6 +44,6 @@ npm run release:updater-manifest -- \
   --notes docs/release-notes/vX.Y.Z.md
 ```
 
-Upload `latest.json`, updater artifacts, signatures, normal installers, and SHA-256 manifests to the same draft GitHub Release. Publish only after verifying that every URL in `latest.json` is publicly downloadable.
+Upload `latest.json`, updater artifacts, signatures, distribution packages (including `Quantum-Leap_X.Y.Z_Windows_x64_portable.zip`), and SHA-256 manifests to the same draft GitHub Release. Publish only after verifying that every URL in `latest.json` is publicly downloadable.
 
-The first release containing the updater is a bootstrap release and must still be installed manually. In-app installation works for later releases. Linux DEB installations intentionally open the Release page instead of replacing package-manager files.
+The first release containing the updater is a bootstrap release and must still be installed manually. In-app installation works for later macOS and Linux AppImage releases. Windows portable and Linux DEB builds intentionally open the Release page instead of replacing files directly.

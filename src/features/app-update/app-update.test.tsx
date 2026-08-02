@@ -110,12 +110,12 @@ describe("app update state", () => {
     mockLatestRelease("1.5.0");
     const downloadAndInstall = vi.fn();
     mocks.getUpdateInstallMode.mockResolvedValue("externalDownload");
-    mocks.check.mockResolvedValue(updateFixture(downloadAndInstall));
 
     await act(async () => checkForAppUpdate());
     await act(async () => installAppUpdate());
 
     expect(mocks.openUrl).toHaveBeenCalledWith("https://github.com/Anti2077/Quantum-Leap/releases/tag/v1.5.0");
+    expect(mocks.check).not.toHaveBeenCalled();
     expect(downloadAndInstall).not.toHaveBeenCalled();
     expect(mocks.relaunch).not.toHaveBeenCalled();
   });

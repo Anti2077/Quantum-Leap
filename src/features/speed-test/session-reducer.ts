@@ -1,4 +1,10 @@
-import type { SpeedPromptEvent, SpeedSample, SpeedStateEvent, TransferDirection } from "../../lib/types";
+import type {
+  SpeedPromptEvent,
+  SpeedSample,
+  SpeedStateEvent,
+  SpeedSummary,
+  TransferDirection
+} from "../../lib/types";
 import { appendSample, type SamplePoint } from "./results-model";
 
 export interface SpeedSessionState {
@@ -7,10 +13,12 @@ export interface SpeedSessionState {
   prompt: SpeedPromptEvent | null;
   status: SpeedStateEvent;
   lastGood: Partial<Record<TransferDirection, SpeedSample>>;
+  summaries: Partial<Record<TransferDirection, SpeedSummary>>;
 }
 
 export type SpeedSessionAction =
   | { type: "sampleReceived"; sample: SpeedSample }
+  | { type: "summaryReceived"; summary: SpeedSummary }
   | { type: "stateReceived"; status: SpeedStateEvent }
   | { type: "promptReceived"; prompt: SpeedPromptEvent }
   | { type: "reset" }
@@ -42,6 +50,11 @@ export function speedSessionReducer(
         lastGood: { ...state.lastGood, [sample.direction]: sample }
       };
     }
+    case "summaryReceived":
+      return {
+        ...state,
+        summaries: { ...state.summaries, [action.summary.direction]: action.summary }
+      };
     case "stateReceived":
     case "replaceStatus":
       return { ...state, status: action.status };
@@ -54,7 +67,7 @@ export function speedSessionReducer(
         status: { phase: "confirming", message: action.prompt.title }
       };
     case "reset":
-      return { ...state, samples: [], latest: null, prompt: null, lastGood: {} };
+      return { ...state, samples: [], latest: null, prompt: null, lastGood: {}, summaries: {} };
     case "dismissPrompt":
       return { ...state, prompt: null };
   }

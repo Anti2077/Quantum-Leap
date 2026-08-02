@@ -3,7 +3,7 @@ use super::{
         bind_unsupported_error, client_args, is_server_unavailable, parse_error_line,
         rejects_bind_option, ClientOutput, RunError,
     },
-    parser::{add_tcp_latency_jitter, parse_sample, parse_text_sample},
+    parser::{add_tcp_latency_jitter, parse_sample, parse_text_sample, parse_udp_receiver_summary},
 };
 use crate::{
     model::{RemoteTarget, TransferDirection, TransportProtocol},
@@ -95,10 +95,22 @@ fn run_blocking(
                 }
                 continue;
             }
+            if protocol == TransportProtocol::Udp {
+                if let Some(summary) = parse_udp_receiver_summary(line, direction, parallel_streams)
+                {
+                    let _ = app.emit("speed://summary", summary);
+                    continue;
+                }
+                if line.ends_with("sender") || line.ends_with("receiver") {
+                    continue;
+                }
+            }
             if let Some(mut sample) = parse_sample(line, direction)
                 .or_else(|| parse_text_sample(line, direction, parallel_streams))
             {
-                add_tcp_latency_jitter(&mut sample, &mut previous_latency_ms);
+                if protocol == TransportProtocol::Tcp {
+                    add_tcp_latency_jitter(&mut sample, &mut previous_latency_ms);
+                }
                 output.sample_count += 1;
                 let _ = app.emit("speed://sample", sample);
             } else if let Some(error) = parse_error_line(line) {

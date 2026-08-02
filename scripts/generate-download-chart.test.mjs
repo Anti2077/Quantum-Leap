@@ -6,6 +6,7 @@ describe("download chart generation", () => {
     expect(classifyPackage("Quantum-Leap_1.4.1_macOS_arm64.dmg")).toBe("macos");
     expect(classifyPackage("Quantum-Leap_1.4.1_macOS_arm64.app.tar.gz")).toBe("macos");
     expect(classifyPackage("Quantum-Leap_1.4.1_x64-setup.exe")).toBe("windows");
+    expect(classifyPackage("Quantum-Leap_1.5.0_Windows_x64_portable.zip")).toBe("windows");
     expect(classifyPackage("Quantum-Leap_1.4.1_amd64.AppImage")).toBe("linux");
     expect(classifyPackage("Quantum-Leap_1.4.1_amd64.deb")).toBe("linux");
     expect(classifyPackage("latest.json")).toBeNull();
@@ -45,7 +46,7 @@ describe("download chart generation", () => {
     );
 
     expect(svg).toContain("<title id=\"title\">Release 下载量</title>");
-    expect(svg).toContain("安装包累计下载");
+    expect(svg).toContain("发布包累计下载");
     expect(svg).toContain("#0d1117");
     expect(svg).toContain(">6</text>");
   });

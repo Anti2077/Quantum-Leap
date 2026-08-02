@@ -1,4 +1,4 @@
-import type { SpeedSample, TransferDirection } from "../../lib/types";
+import type { SpeedSample, SpeedSummary, TransferDirection } from "../../lib/types";
 
 export interface SamplePoint {
   t: number;
@@ -53,5 +53,18 @@ export function summarizeSamples(
     retransmits: selected.reduce((sum, sample) => sum + sample.retransmits, 0),
     latency: latency.length ? latency.reduce((sum, value) => sum + value, 0) / latency.length : null,
     jitter: jitter.length ? jitter.reduce((sum, value) => sum + value, 0) / jitter.length : null
+  };
+}
+
+export function applyReceiverSummary(
+  sampled: SampleSummary,
+  receiver?: SpeedSummary
+): SampleSummary {
+  if (!receiver) return sampled;
+  return {
+    ...sampled,
+    average: receiver.bandwidthBps,
+    bytes: receiver.bytes,
+    jitter: receiver.jitterMs ?? null
   };
 }
