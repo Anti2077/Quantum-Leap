@@ -7,7 +7,9 @@ use super::{
     latency::{spawn_ping, stop_ping, PingMetrics},
     parser::{add_tcp_latency_jitter, parse_sample, parse_text_sample, parse_udp_receiver_summary},
 };
-use crate::model::{SpeedTestRequest, TransferDirection, TransportProtocol};
+use crate::model::{
+    SpeedTestRequest, TransferDirection, TransportProtocol, SPEED_SAMPLE_EVENT, SPEED_SUMMARY_EVENT,
+};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_shell::process::CommandEvent;
@@ -43,7 +45,7 @@ async fn process_output_line(
     let line = String::from_utf8_lossy(line);
     if protocol == TransportProtocol::Udp {
         if let Some(summary) = parse_udp_receiver_summary(&line, direction, parallel_streams) {
-            let _ = app.emit("speed://summary", summary);
+            let _ = app.emit(SPEED_SUMMARY_EVENT, summary);
             return;
         }
         if line.trim_end().ends_with("sender") || line.trim_end().ends_with("receiver") {
@@ -65,7 +67,7 @@ async fn process_output_line(
             add_tcp_latency_jitter(&mut sample, previous_latency_ms);
         }
         output.sample_count += 1;
-        let _ = app.emit("speed://sample", sample);
+        let _ = app.emit(SPEED_SAMPLE_EVENT, sample);
     } else if let Some(error) = parse_error_line(&line) {
         output.error = Some(error);
     }

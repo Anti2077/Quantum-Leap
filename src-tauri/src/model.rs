@@ -4,6 +4,10 @@ use std::net::IpAddr;
 pub const STANDARD_DURATION_SECONDS: u16 = 10;
 pub const STANDARD_PARALLEL_STREAMS: u8 = 8;
 pub const MAX_TARGET_BITRATE_BPS: u64 = 100_000_000_000;
+pub const SPEED_SAMPLE_EVENT: &str = "speed://sample";
+pub const SPEED_SUMMARY_EVENT: &str = "speed://summary";
+pub const SPEED_STATE_EVENT: &str = "speed://state";
+pub const SPEED_PROMPT_EVENT: &str = "speed://prompt";
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub enum UiLanguage {
@@ -562,5 +566,114 @@ mod tests {
         assert!(request.validate().is_ok());
         assert_eq!(request.target_host(), "10.0.0.8");
         assert!(request.remote_target().bind_ip.is_empty());
+    }
+
+    #[test]
+    fn shared_frontend_contract_matches_rust_serde_shapes() {
+        let contract: serde_json::Value =
+            serde_json::from_str(include_str!("../../contracts/speed-test.json"))
+                .expect("parse shared speed-test contract");
+        assert_eq!(
+            contract["eventNames"],
+            serde_json::json!({
+                "sample": SPEED_SAMPLE_EVENT,
+                "summary": SPEED_SUMMARY_EVENT,
+                "state": SPEED_STATE_EVENT,
+                "prompt": SPEED_PROMPT_EVENT,
+            })
+        );
+
+        let request_value = contract["request"].clone();
+        let request_keys = request_value
+            .as_object()
+            .expect("request contract object")
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected_request_keys = [
+            "language",
+            "host",
+            "sshPort",
+            "iperfPort",
+            "remoteIperfPath",
+            "localBindIp",
+            "serverBindIp",
+            "serverMode",
+            "username",
+            "password",
+            "authMethod",
+            "privateKeyPath",
+            "passphrase",
+            "testMode",
+            "direction",
+            "protocol",
+            "parallelStreams",
+            "durationSeconds",
+            "targetBitrateBps",
+            "reuseExistingServer",
+            "allowHostKeyMismatch",
+            "testTopology",
+            "remoteClient",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(request_keys, expected_request_keys);
+
+        let request: SpeedTestRequest =
+            serde_json::from_value(request_value).expect("deserialize frontend request contract");
+        assert_eq!(request.language, UiLanguage::ZhCn);
+        assert_eq!(request.server_mode, ServerMode::SshManaged);
+        assert_eq!(request.auth_method, SshAuthMethod::PrivateKey);
+        assert_eq!(request.test_mode, TestMode::Advanced);
+        assert_eq!(request.direction, TransferDirection::Download);
+        assert_eq!(request.protocol, TransportProtocol::Udp);
+        assert_eq!(request.test_topology, TestTopology::RemoteToRemote);
+        assert!(request.validate().is_ok());
+
+        let events = &contract["events"];
+        assert_eq!(
+            serde_json::to_value(SpeedStateEvent {
+                phase: SpeedPhase::Running,
+                message: "contract-state".into(),
+            })
+            .expect("serialize state event"),
+            events["state"]
+        );
+        assert_eq!(
+            serde_json::to_value(SpeedPromptEvent {
+                kind: PromptKind::ClientHostKeyMismatch,
+                title: "contract-title".into(),
+                message: "contract-message".into(),
+                detail: Some("SHA256:contract".into()),
+            })
+            .expect("serialize prompt event"),
+            events["prompt"]
+        );
+        assert_eq!(
+            serde_json::to_value(SpeedSampleEvent {
+                elapsed: 1.5,
+                bandwidth_bps: 125_000_000.0,
+                bytes: 23_456_789,
+                latency_ms: Some(12.5),
+                jitter_ms: Some(0.8),
+                retransmits: Some(2),
+                direction: TransferDirection::Download,
+            })
+            .expect("serialize sample event"),
+            events["sample"]
+        );
+        assert_eq!(
+            serde_json::to_value(SpeedSummaryEvent {
+                bandwidth_bps: 120_000_000.0,
+                bytes: 450_000_000,
+                jitter_ms: Some(0.9),
+                lost_packets: Some(3),
+                packets: Some(4_200),
+                lost_percent: Some(0.071),
+                direction: TransferDirection::Download,
+            })
+            .expect("serialize summary event"),
+            events["summary"]
+        );
     }
 }

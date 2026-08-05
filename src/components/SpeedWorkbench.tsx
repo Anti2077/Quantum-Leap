@@ -1,32 +1,16 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as Dialog from "@radix-ui/react-dialog";
-import * as Popover from "@radix-ui/react-popover";
 import { AnimatePresence, motion } from "framer-motion";
 import Activity from "lucide-react/dist/esm/icons/activity.js";
-import ArrowDownToLine from "lucide-react/dist/esm/icons/arrow-down-to-line.js";
-import ArrowRightLeft from "lucide-react/dist/esm/icons/arrow-right-left.js";
-import ArrowUpFromLine from "lucide-react/dist/esm/icons/arrow-up-from-line.js";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
-import CircleAlert from "lucide-react/dist/esm/icons/circle-alert.js";
-import BookMarked from "lucide-react/dist/esm/icons/book-marked.js";
-import Clock3 from "lucide-react/dist/esm/icons/clock-3.js";
-import Check from "lucide-react/dist/esm/icons/check.js";
 import FileKey2 from "lucide-react/dist/esm/icons/file-key-2.js";
-import Gauge from "lucide-react/dist/esm/icons/gauge.js";
-import GripVertical from "lucide-react/dist/esm/icons/grip-vertical.js";
 import KeyRound from "lucide-react/dist/esm/icons/key-round.js";
-import Layers3 from "lucide-react/dist/esm/icons/layers-3.js";
 import Network from "lucide-react/dist/esm/icons/network.js";
-import Play from "lucide-react/dist/esm/icons/play.js";
-import Plus from "lucide-react/dist/esm/icons/plus.js";
 import Radio from "lucide-react/dist/esm/icons/radio.js";
 import Server from "lucide-react/dist/esm/icons/server.js";
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.js";
 import Info from "lucide-react/dist/esm/icons/info.js";
-import Square from "lucide-react/dist/esm/icons/square.js";
-import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
 import UserRound from "lucide-react/dist/esm/icons/user-round.js";
-import Waves from "lucide-react/dist/esm/icons/waves.js";
 import X from "lucide-react/dist/esm/icons/x.js";
 import {
   useEffect,
@@ -35,18 +19,9 @@ import {
   useState,
   type CSSProperties,
   type FormEvent,
-  type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent,
-  type ReactNode
+  type MouseEvent as ReactMouseEvent
 } from "react";
-import {
-  deleteSavedServer,
-  getSavedServerPassword,
-  listSavedServers,
-  saveServer,
-  startSpeedTest,
-  stopSpeedTest
-} from "../lib/api";
+import { startSpeedTest, stopSpeedTest } from "../lib/api";
 import {
   formatBandwidthParts,
   type BandwidthUnit
@@ -65,8 +40,6 @@ import {
   deriveTestConfiguration,
   initialForm,
   initialRemoteClientForm,
-  STANDARD_DURATION_SECONDS,
-  STANDARD_PARALLEL_STREAMS,
   type ConnectionForm,
   type RemoteClientForm
 } from "../features/speed-test/form-model";
@@ -79,22 +52,25 @@ import { useSpeedTestSession } from "../features/speed-test/useSpeedTestSession"
 import { PromptDialog } from "../features/speed-test/PromptDialog";
 import { ResultsPanel } from "../features/speed-test/ResultsPanel";
 import {
-  buildSaveServerRequest,
-  matchingSavedServer,
-  savedServerToClientForm,
-  savedServerToConnectionForm,
-  swapRemoteEndpointForms
-} from "../features/speed-test/endpoint-model";
+  EndpointOverview,
+  FieldLabel,
+  SavedEndpointSelect,
+  TopologySelector
+} from "../features/speed-test/EndpointConfiguration";
+import { TestConfiguration } from "../features/speed-test/TestConfiguration";
+import { SavedServersPopover } from "../features/saved-servers/SavedServersPopover";
+import { useSavedServers } from "../features/saved-servers/useSavedServers";
+import { swapRemoteEndpointForms } from "../features/speed-test/endpoint-model";
 import { GlassPanel } from "./GlassPanel";
 import { AppSettings } from "./AppSettings";
+import {
+  ConnectionShell,
+  LAYOUT_DIVIDER_WIDTH,
+  LayoutResizer,
+  useWorkbenchLayout
+} from "./workbench/WorkbenchLayout";
 
 const BANDWIDTH_UNIT_KEY = "pulse.bandwidth-unit";
-const LAYOUT_SPLIT_KEY = "pulse.layout-split";
-const DEFAULT_LAYOUT_SPLIT = 0.32;
-const MIN_LAYOUT_SPLIT = 0.25;
-const MAX_LAYOUT_SPLIT = 0.5;
-const LAYOUT_DIVIDER_WIDTH = 20;
-const COMPACT_LAYOUT_QUERY = "(max-width: 860px)";
 const CONNECTION_FORM_ID = "connection-settings-form";
 type DesignPreviewTheme = "air" | "frost" | "crystal";
 
@@ -123,23 +99,6 @@ function savedBandwidthUnit(): BandwidthUnit {
   }
 }
 
-function savedLayoutSplit(): number {
-  try {
-    const storedValue = localStorage.getItem(LAYOUT_SPLIT_KEY);
-    if (storedValue == null) return DEFAULT_LAYOUT_SPLIT;
-    const value = Number(storedValue);
-    return Number.isFinite(value)
-      ? Math.min(MAX_LAYOUT_SPLIT, Math.max(MIN_LAYOUT_SPLIT, value))
-      : DEFAULT_LAYOUT_SPLIT;
-  } catch {
-    return DEFAULT_LAYOUT_SPLIT;
-  }
-}
-
-function usesCompactLayout() {
-  return window.matchMedia(COMPACT_LAYOUT_QUERY).matches;
-}
-
 const phaseLabelKeys: Record<SpeedStateEvent["phase"], TranslationKey> = {
   idle: "ready",
   starting: "connecting",
@@ -150,186 +109,6 @@ const phaseLabelKeys: Record<SpeedStateEvent["phase"], TranslationKey> = {
   cancelled: "stopped",
   failed: "error"
 };
-
-function FieldLabel({ icon, children }: { icon: ReactNode; children: ReactNode }) {
-  return (
-    <span className="field-label">
-      {icon}
-      {children}
-    </span>
-  );
-}
-
-function TargetRateInput({
-  value,
-  disabled,
-  onChange
-}: {
-  value: string;
-  disabled: boolean;
-  onChange: (value: string) => void;
-}) {
-  const { t } = useI18n();
-  return (
-    <label className="target-rate-field">
-      <div className="duration-input target-rate-input">
-        <input
-          className="glass-input"
-          type="number"
-          min="0.1"
-          max="100000"
-          step="0.1"
-          value={value}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value)}
-          aria-label={t("targetRate")}
-        />
-        <span>{t("megabitsPerSecond")}</span>
-      </div>
-    </label>
-  );
-}
-
-function AutoHeight({ children }: { children: ReactNode }) {
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState<number | "auto">("auto");
-
-  useEffect(() => {
-    const content = contentRef.current;
-    if (!content || typeof ResizeObserver === "undefined") return;
-
-    const updateHeight = () => {
-      const nextHeight = content.getBoundingClientRect().height;
-      setHeight((current) => current === nextHeight ? current : nextHeight);
-    };
-
-    updateHeight();
-    const observer = new ResizeObserver(updateHeight);
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, []);
-
-  return (
-    <motion.div
-      className="test-settings-transition"
-      initial={false}
-      animate={{ height }}
-      transition={{ height: { duration: 0.5, ease: [0.4, 0, 0.2, 1] } }}
-    >
-      <div ref={contentRef} className="test-settings-content">
-        {children}
-      </div>
-    </motion.div>
-  );
-}
-
-function ConnectionShell({
-  compact,
-  open,
-  busy,
-  status,
-  summaryLabel,
-  summaryValue,
-  configureLabel,
-  stopLabel,
-  onOpenChange,
-  onStop,
-  onNestedEscape,
-  children
-}: {
-  compact: boolean;
-  open: boolean;
-  busy: boolean;
-  status: SpeedStateEvent["phase"];
-  summaryLabel: string;
-  summaryValue: string;
-  configureLabel: string;
-  stopLabel: string;
-  onOpenChange: (open: boolean) => void;
-  onStop: () => void;
-  onNestedEscape: () => boolean;
-  children: ReactNode;
-}) {
-  if (!compact) {
-    return <aside className="connection-column">{children}</aside>;
-  }
-
-  return (
-    <div className="command-bar" aria-label={configureLabel}>
-      <div className="command-endpoint">
-        <span className={`command-status phase-${status}`} aria-hidden="true" />
-        <div>
-          <span>{summaryLabel}</span>
-          <strong>{summaryValue}</strong>
-        </div>
-      </div>
-      <div className="command-actions">
-        <button
-          type="button"
-          className="command-stop"
-          onClick={onStop}
-          disabled={!busy}
-          aria-label={stopLabel}
-          title={stopLabel}
-        >
-          <Square size={14} fill="currentColor" aria-hidden="true" />
-        </button>
-        <Dialog.Root open={open} onOpenChange={onOpenChange}>
-          <Dialog.Trigger asChild>
-            <button type="button" className="configure-trigger">
-              <Settings2 size={15} aria-hidden="true" />
-              {configureLabel}
-            </button>
-          </Dialog.Trigger>
-          <Dialog.Portal>
-            <Dialog.Overlay className="connection-drawer-overlay" />
-            <Dialog.Content
-              className="connection-drawer"
-              onEscapeKeyDown={(event) => {
-                if (!onNestedEscape()) return;
-                event.preventDefault();
-              }}
-            >
-              {children}
-            </Dialog.Content>
-          </Dialog.Portal>
-        </Dialog.Root>
-      </div>
-    </div>
-  );
-}
-
-function SavedEndpointSelect({
-  value,
-  servers,
-  disabled,
-  onChange
-}: {
-  value: string;
-  servers: SavedServer[];
-  disabled: boolean;
-  onChange: (id: string) => void;
-}) {
-  const { t } = useI18n();
-  return (
-    <label>
-      <FieldLabel icon={<BookMarked size={13} />}>{t("loadSavedDevice")}</FieldLabel>
-      <select
-        className="glass-input"
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">{t("enterManually")}</option>
-        {servers.map((server) => (
-          <option value={server.id} key={server.id}>
-            {server.note ? `${server.note} · ${server.host}` : server.host}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
 
 function errorMessage(error: unknown, fallback: string) {
   if (typeof error === "string") return error;
@@ -381,8 +160,6 @@ export function SpeedWorkbench() {
         }
       : initialRemoteClientForm
   );
-  const [clientSavedId, setClientSavedId] = useState("");
-  const [serverSavedId, setServerSavedId] = useState("");
   const [endpointEditor, setEndpointEditor] = useState<"client" | "server" | null>(null);
   const [clientAdvancedOpen, setClientAdvancedOpen] = useState(false);
   const [serverAdvancedOpen, setServerAdvancedOpen] = useState(advancedPreview);
@@ -448,33 +225,60 @@ export function SpeedWorkbench() {
         }
       : {}
   }));
-  const [savedServers, setSavedServers] = useState<SavedServer[]>(() =>
-    designPreviewTheme
-      ? [
-          { id: "preview-1", note: t("previewCloud"), host: "edge.example", sshPort: 22, iperfPort: 5201, remoteIperfPath: "", bindIp: "", serverMode: "sshManaged", username: "operator", password: "preview", authMethod: "password", privateKeyPath: "" },
-          { id: "preview-2", note: t("previewRouter"), host: "198.51.100.20", sshPort: 22, iperfPort: 5201, remoteIperfPath: "", bindIp: "", serverMode: "existing", username: "", password: "", authMethod: "password", privateKeyPath: "" },
-          { id: "preview-3", note: t("previewDevMachine"), host: "203.0.113.30", sshPort: 22, iperfPort: 5201, remoteIperfPath: "/opt/bin/iperf3", bindIp: "203.0.113.30", serverMode: "sshManaged", username: "operator", password: "preview", authMethod: "password", privateKeyPath: "" }
-        ]
-      : []
-  );
-  const [savedMenuOpen, setSavedMenuOpen] = useState(false);
+  const previewSavedServers: SavedServer[] = designPreviewTheme
+    ? [
+        { id: "preview-1", note: t("previewCloud"), host: "edge.example", sshPort: 22, iperfPort: 5201, remoteIperfPath: "", bindIp: "", serverMode: "sshManaged", username: "operator", password: "preview", authMethod: "password", privateKeyPath: "" },
+        { id: "preview-2", note: t("previewRouter"), host: "198.51.100.20", sshPort: 22, iperfPort: 5201, remoteIperfPath: "", bindIp: "", serverMode: "existing", username: "", password: "", authMethod: "password", privateKeyPath: "" },
+        { id: "preview-3", note: t("previewDevMachine"), host: "203.0.113.30", sshPort: 22, iperfPort: 5201, remoteIperfPath: "/opt/bin/iperf3", bindIp: "203.0.113.30", serverMode: "sshManaged", username: "operator", password: "preview", authMethod: "password", privateKeyPath: "" }
+      ]
+    : [];
+  const {
+    servers: savedServers,
+    menuOpen: savedMenuOpen,
+    setMenuOpen: setSavedMenuOpen,
+    noteEditorOpen: savedNoteEditorOpen,
+    setNoteEditorOpen: setSavedNoteEditorOpen,
+    noteDraft: savedNoteDraft,
+    setNoteDraft: setSavedNoteDraft,
+    busy: savedBusy,
+    clientSavedId,
+    serverSavedId,
+    clearClientSelection,
+    clearServerSelection,
+    swapSelectedIds,
+    selectClient: selectSavedClient,
+    selectServer: selectSavedServer,
+    selectServerById: selectSavedServerById,
+    openNoteEditor,
+    saveCurrent: saveCurrentServer,
+    remove: removeSavedServer
+  } = useSavedServers({
+    form,
+    setForm,
+    setClientForm,
+    setStatus,
+    initialServers: previewSavedServers
+  });
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [savedNoteEditorOpen, setSavedNoteEditorOpen] = useState(false);
-  const [savedNoteDraft, setSavedNoteDraft] = useState("");
-  const [savedBusy, setSavedBusy] = useState(false);
   const [promptDetailCopied, setPromptDetailCopied] = useState(false);
   const [bandwidthUnit, setBandwidthUnit] = useState<BandwidthUnit>(savedBandwidthUnit);
-  const [compactLayout, setCompactLayout] = useState(usesCompactLayout);
-  const [layoutSplit, setLayoutSplit] = useState(() =>
-    usesCompactLayout() ? DEFAULT_LAYOUT_SPLIT : savedLayoutSplit()
-  );
-  const [layoutResizing, setLayoutResizing] = useState(false);
-  const [connectionOpen, setConnectionOpen] = useState(
-    () => previewParameters?.get("drawerPreview") === "1"
-  );
+  const {
+    appContentRef,
+    endpointEditorRef,
+    compactLayout,
+    layoutSplit,
+    layoutResizing,
+    connectionOpen,
+    setConnectionOpen,
+    setLayoutSplit,
+    startLayoutResize,
+    moveLayoutResize,
+    stopLayoutResize
+  } = useWorkbenchLayout({
+    endpointEditor,
+    initialConnectionOpen: previewParameters?.get("drawerPreview") === "1"
+  });
   const requestRef = useRef<SpeedTestRequest | null>(null);
-  const appContentRef = useRef<HTMLElement>(null);
-  const endpointEditorRef = useRef<HTMLElement>(null);
   const previousLanguageRef = useRef(language);
 
   const startWindowDrag = (event: ReactMouseEvent<HTMLElement>) => {
@@ -484,49 +288,7 @@ export function SpeedWorkbench() {
     void getCurrentWindow().startDragging().catch(() => undefined);
   };
 
-  const updateLayoutSplit = (clientX: number) => {
-    if (compactLayout) return;
-    const bounds = appContentRef.current?.getBoundingClientRect();
-    if (!bounds) return;
-    const availableWidth = Math.max(1, bounds.width - LAYOUT_DIVIDER_WIDTH);
-    const next = (clientX - bounds.left - LAYOUT_DIVIDER_WIDTH / 2) / availableWidth;
-    setLayoutSplit(Math.min(MAX_LAYOUT_SPLIT, Math.max(MIN_LAYOUT_SPLIT, next)));
-  };
-
-  const startLayoutResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (compactLayout || event.button !== 0) return;
-    event.preventDefault();
-    if (typeof event.currentTarget.setPointerCapture === "function") {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    }
-    setLayoutResizing(true);
-    updateLayoutSplit(event.clientX);
-  };
-
-  const moveLayoutResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!layoutResizing) return;
-    event.preventDefault();
-    updateLayoutSplit(event.clientX);
-  };
-
-  const stopLayoutResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!layoutResizing) return;
-    if (
-      typeof event.currentTarget.hasPointerCapture === "function" &&
-      event.currentTarget.hasPointerCapture(event.pointerId)
-    ) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    setLayoutResizing(false);
-  };
-
   useEffect(() => setPromptDetailCopied(false), [prompt]);
-
-  useEffect(() => {
-    void listSavedServers(language)
-      .then(setSavedServers)
-      .catch(() => undefined);
-  }, [language]);
 
   useEffect(() => {
     try {
@@ -536,41 +298,7 @@ export function SpeedWorkbench() {
     }
   }, [bandwidthUnit]);
 
-  useEffect(() => {
-    const media = window.matchMedia(COMPACT_LAYOUT_QUERY);
-    const updateLayoutMode = (event: MediaQueryListEvent) => {
-      setCompactLayout(event.matches);
-      setLayoutResizing(false);
-      if (!event.matches) setConnectionOpen(false);
-    };
-    media.addEventListener("change", updateLayoutMode);
-    return () => media.removeEventListener("change", updateLayoutMode);
-  }, []);
-
-  useEffect(() => {
-    if (compactLayout) return;
-    try {
-      localStorage.setItem(LAYOUT_SPLIT_KEY, layoutSplit.toString());
-    } catch {
-      // The adjusted layout still applies for this session when storage is unavailable.
-    }
-  }, [compactLayout, layoutSplit]);
-
-  useEffect(() => {
-    if (savedMenuOpen) return;
-    setSavedNoteEditorOpen(false);
-    setSavedNoteDraft("");
-  }, [savedMenuOpen]);
-
   const busy = previewDirection != null || ["starting", "running", "stopping"].includes(status.phase);
-
-  useEffect(() => {
-    if (!compactLayout || !connectionOpen || !endpointEditor) return;
-    const frame = requestAnimationFrame(() => {
-      endpointEditorRef.current?.scrollIntoView({ block: "nearest" });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [compactLayout, connectionOpen, endpointEditor]);
 
   useEffect(() => {
     if (previousLanguageRef.current === language) return;
@@ -670,32 +398,12 @@ export function SpeedWorkbench() {
 
   const updateServer = <K extends keyof ConnectionForm>(key: K, value: ConnectionForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
-    setServerSavedId("");
+    clearServerSelection();
   };
 
   const updateClient = <K extends keyof RemoteClientForm>(key: K, value: RemoteClientForm[K]) => {
     setClientForm((current) => ({ ...current, [key]: value }));
-    setClientSavedId("");
-  };
-
-  const selectSavedClient = async (id: string) => {
-    setClientSavedId(id);
-    if (!id || savedBusy) return;
-    const server = savedServers.find((candidate) => candidate.id === id);
-    if (!server || server.serverMode !== "sshManaged") return;
-    setSavedBusy(true);
-    try {
-      const password = server.password || (await getSavedServerPassword(server.id, language));
-      setSavedServers((current) =>
-        current.map((saved) => (saved.id === server.id ? { ...saved, password } : saved))
-      );
-      setClientForm(savedServerToClientForm(server, password, initialRemoteClientForm.privateKeyPath));
-      setStatus({ phase: "idle", message: t("clientSelected", { name: server.note || server.host }) });
-    } catch (error) {
-      setStatus({ phase: "failed", message: errorMessage(error, t("savedActionError")) });
-    } finally {
-      setSavedBusy(false);
-    }
+    clearClientSelection();
   };
 
   const swapRemoteEndpoints = () => {
@@ -703,78 +411,8 @@ export function SpeedWorkbench() {
     const swapped = swapRemoteEndpointForms(form, clientForm);
     setForm(swapped.server);
     setClientForm(swapped.client);
-    const previousClientSavedId = clientSavedId;
-    setClientSavedId(serverSavedId);
-    setServerSavedId(previousClientSavedId);
+    swapSelectedIds();
     setStatus({ phase: "idle", message: t("endpointsSwapped") });
-  };
-
-  const selectSavedServer = async (server: SavedServer) => {
-    if (savedBusy) return;
-    setSavedBusy(true);
-    try {
-      const password = server.serverMode === "sshManaged"
-        ? server.password || (await getSavedServerPassword(server.id, language))
-        : "";
-      setSavedServers((current) =>
-        current.map((saved) => (saved.id === server.id ? { ...saved, password } : saved))
-      );
-      setForm((current) => savedServerToConnectionForm(current, server, password, initialForm.privateKeyPath));
-      setServerSavedId(server.id);
-      setSavedMenuOpen(false);
-      setStatus({ phase: "idle", message: t("serverLoaded", { host: server.host }) });
-    } catch (error) {
-      setStatus({ phase: "failed", message: errorMessage(error, t("savedActionError")) });
-    } finally {
-      setSavedBusy(false);
-    }
-  };
-
-  const selectSavedServerById = async (id: string) => {
-    setServerSavedId(id);
-    if (!id || savedBusy) return;
-    const server = savedServers.find((candidate) => candidate.id === id);
-    if (server) await selectSavedServer(server);
-  };
-
-  const openSavedNoteEditor = () => {
-    if (!canSaveCurrentServer || savedBusy) return;
-    const existing = matchingSavedServer(savedServers, form);
-    setSavedNoteDraft(existing?.note ?? "");
-    setSavedNoteEditorOpen(true);
-  };
-
-  const saveCurrentServer = async () => {
-    if (!canSaveCurrentServer || savedBusy) return;
-    const existing = matchingSavedServer(savedServers, form);
-    setSavedBusy(true);
-    try {
-      const saved = await saveServer(
-        buildSaveServerRequest(form, savedNoteDraft, existing?.id),
-        language
-      );
-      setSavedServers((current) => [saved, ...current.filter((server) => server.id !== saved.id)]);
-      setSavedNoteEditorOpen(false);
-      setSavedNoteDraft("");
-      setStatus({ phase: "idle", message: t("serverSaved", { name: saved.note || saved.host }) });
-    } catch (error) {
-      setStatus({ phase: "failed", message: errorMessage(error, t("savedActionError")) });
-    } finally {
-      setSavedBusy(false);
-    }
-  };
-
-  const removeSavedServer = async (id: string) => {
-    if (savedBusy) return;
-    setSavedBusy(true);
-    try {
-      await deleteSavedServer(id, language);
-      setSavedServers((current) => current.filter((server) => server.id !== id));
-    } catch (error) {
-      setStatus({ phase: "failed", message: errorMessage(error, t("savedActionError")) });
-    } finally {
-      setSavedBusy(false);
-    }
   };
 
   const launch = async (request: SpeedTestRequest) => {
@@ -912,113 +550,23 @@ export function SpeedWorkbench() {
                 )}
               </div>
               <div className="drawer-heading-actions">
-                <Popover.Root open={savedMenuOpen} onOpenChange={setSavedMenuOpen}>
-                  <div className="saved-server-control">
-                    <Popover.Trigger asChild>
-                      <button
-                        type="button"
-                        className={savedMenuOpen ? "saved-server-trigger active" : "saved-server-trigger"}
-                        disabled={busy}
-                        title={t("savedServers")}
-                      >
-                        <BookMarked size={15} aria-hidden="true" />
-                        {t("savedServers")}
-                      </button>
-                    </Popover.Trigger>
-                    <Popover.Portal>
-                      <Popover.Content
-                        className="saved-server-menu"
-                        side="bottom"
-                        align="end"
-                        sideOffset={8}
-                        collisionPadding={12}
-                      >
-                      <div className="saved-menu-heading">
-                        <strong>{t("savedServers")}</strong>
-                        <button
-                          type="button"
-                          onClick={openSavedNoteEditor}
-                          disabled={!canSaveCurrentServer || savedBusy}
-                          aria-label={t("addCurrentServer")}
-                          title={t("addCurrentServer")}
-                        >
-                          <Plus size={14} />
-                        </button>
-                      </div>
-                      <AnimatePresence initial={false}>
-                        {savedNoteEditorOpen && (
-                          <motion.form
-                            className="saved-note-editor"
-                            onSubmit={(event) => {
-                              event.preventDefault();
-                              void saveCurrentServer();
-                            }}
-                            initial={{ opacity: 0, height: 0, y: -4 }}
-                            animate={{ opacity: 1, height: "auto", y: 0 }}
-                            exit={{ opacity: 0, height: 0, y: -4 }}
-                          >
-                            <span title={form.host.trim()}>{form.host.trim()}</span>
-                            <div className="saved-note-row">
-                              <input
-                                autoFocus
-                                value={savedNoteDraft}
-                                maxLength={48}
-                                onChange={(event) => setSavedNoteDraft(event.target.value)}
-                                placeholder={t("optionalNote")}
-                                aria-label={t("serverNote")}
-                              />
-                              <button
-                                type="submit"
-                                disabled={savedBusy}
-                                aria-label={t("save")}
-                                title={t("save")}
-                              >
-                                <Check size={14} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setSavedNoteEditorOpen(false)}
-                                aria-label={t("cancel")}
-                                title={t("cancel")}
-                              >
-                                <X size={14} />
-                              </button>
-                            </div>
-                          </motion.form>
-                        )}
-                      </AnimatePresence>
-                      <div className="saved-server-list">
-                        {savedServers.length === 0 ? (
-                          <span className="saved-empty">{t("noSavedServers")}</span>
-                        ) : (
-                          savedServers.map((server) => (
-                            <div className="saved-server-item" key={server.id}>
-                              <button type="button" onClick={() => selectSavedServer(server)}>
-                                <span className="saved-server-name">{server.note || server.host}</span>
-                                {server.note && <small className="saved-server-address">{server.host}</small>}
-                                <small className="saved-server-meta">
-                                  {server.serverMode === "sshManaged"
-                                    ? t("savedSshMeta", { username: server.username, port: server.sshPort })
-                                    : t("directShort", { port: server.iperfPort })}
-                                </small>
-                              </button>
-                              <button
-                                type="button"
-                                className="delete-saved"
-                                onClick={() => removeSavedServer(server.id)}
-                                aria-label={t("deleteServer", { host: server.host })}
-                                title={t("delete")}
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                      </Popover.Content>
-                    </Popover.Portal>
-                  </div>
-                </Popover.Root>
+                <SavedServersPopover
+                  open={savedMenuOpen}
+                  busy={busy}
+                  savedBusy={savedBusy}
+                  canSaveCurrentServer={canSaveCurrentServer}
+                  servers={savedServers}
+                  currentHost={form.host.trim()}
+                  noteEditorOpen={savedNoteEditorOpen}
+                  noteDraft={savedNoteDraft}
+                  onOpenChange={setSavedMenuOpen}
+                  onOpenNoteEditor={() => openNoteEditor(canSaveCurrentServer)}
+                  onNoteDraftChange={setSavedNoteDraft}
+                  onCloseNoteEditor={() => setSavedNoteEditorOpen(false)}
+                  onSave={() => void saveCurrentServer(canSaveCurrentServer)}
+                  onSelect={(server) => void selectSavedServer(server)}
+                  onDelete={(id) => void removeSavedServer(id)}
+                />
                 {compactLayout && (
                   <Dialog.Close asChild>
                     <button
@@ -1035,84 +583,24 @@ export function SpeedWorkbench() {
             </div>
 
               <form id={CONNECTION_FORM_ID} onSubmit={submit} className="connection-form">
-                <div className="connection-fixed-top-controls">
-                  <div className="server-mode-label topology-mode-label">
-                    <span className="field-label">{t("topology")}</span>
-                    <span className="mode-help" tabIndex={0} aria-label={t("topologyHelp")}>
-                      <CircleAlert size={14} aria-hidden="true" />
-                      <span className="mode-tooltip" role="tooltip">
-                        <strong>{t("localTest")}</strong>
-                        <span>{t("localTestHelp")}</span>
-                        <strong>{t("remoteTest")}</strong>
-                        <span>{t("remoteTestHelp")}</span>
-                      </span>
-                    </span>
-                  </div>
-                  <div className="test-mode-tabs topology-tabs" aria-label={t("topology")}>
-                    <button
-                      type="button"
-                      className={!remoteToRemote ? "selected" : ""}
-                      disabled={busy}
-                      onClick={() => update("testTopology", "localToRemote")}
-                    >
-                      {t("localTest")}
-                    </button>
-                    <button
-                      type="button"
-                      className={remoteToRemote ? "selected" : ""}
-                      disabled={busy}
-                      onClick={() => update("testTopology", "remoteToRemote")}
-                    >
-                      {t("remoteTest")}
-                    </button>
-                  </div>
-                </div>
+                <TopologySelector
+                  remoteToRemote={remoteToRemote}
+                  busy={busy}
+                  onChange={(next) => update("testTopology", next ? "remoteToRemote" : "localToRemote")}
+                />
 
                 <div className="connection-scroll-region">
 
                 {remoteToRemote && (
-                  <section className="endpoint-overview" aria-label={t("dualDevices")}>
-                    <div className="endpoint-overview-row">
-                      <button
-                        type="button"
-                        className={`endpoint-summary-card ${endpointEditor === "client" ? "is-active" : ""}`}
-                        disabled={busy}
-                        onClick={() => setEndpointEditor((current) => current === "client" ? null : "client")}
-                        aria-label={t("editClient")}
-                        aria-expanded={endpointEditor === "client"}
-                      >
-                        <span className="endpoint-summary-copy">
-                          <span className="endpoint-summary-role">{t("initiator")}</span>
-                          <strong>{clientForm.host.trim() || t("ipNotConfigured")}</strong>
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="endpoint-swap-button"
-                        onClick={swapRemoteEndpoints}
-                        disabled={!sshManaged || busy}
-                        title={sshManaged ? t("swapEndpoints") : t("swapRequiresSsh")}
-                        aria-label={t("swapEndpoints")}
-                      >
-                        <ArrowRightLeft size={17} aria-hidden="true" />
-                      </button>
-
-                      <button
-                        type="button"
-                        className={`endpoint-summary-card ${endpointEditor === "server" ? "is-active" : ""}`}
-                        disabled={busy}
-                        onClick={() => setEndpointEditor((current) => current === "server" ? null : "server")}
-                        aria-label={t("editServer")}
-                        aria-expanded={endpointEditor === "server"}
-                      >
-                        <span className="endpoint-summary-copy">
-                          <span className="endpoint-summary-role">{t("server")}</span>
-                          <strong>{form.host.trim() || t("ipNotConfigured")}</strong>
-                        </span>
-                      </button>
-                    </div>
-                  </section>
+                  <EndpointOverview
+                    editor={endpointEditor}
+                    clientHost={clientForm.host.trim()}
+                    serverHost={form.host.trim()}
+                    sshManaged={sshManaged}
+                    busy={busy}
+                    onEditorChange={setEndpointEditor}
+                    onSwap={swapRemoteEndpoints}
+                  />
                 )}
 
                 <AnimatePresence initial={false}>
@@ -1642,226 +1130,28 @@ export function SpeedWorkbench() {
 
                 </div>
 
-                <div className="connection-fixed-controls">
-              <div className="test-mode-tabs" aria-label={t("testMode")}>
-                <button
-                  type="button"
-                  className={standard ? "selected" : ""}
-                  disabled={busy}
-                  onClick={() => update("testMode", "standard")}
-                >
-                  <Gauge size={14} aria-hidden="true" />
-                  {t("standardTest")}
-                </button>
-                <button
-                  type="button"
-                  className={!standard ? "selected" : ""}
-                  disabled={busy}
-                  onClick={() => update("testMode", "advanced")}
-                >
-                  <Settings2 size={14} aria-hidden="true" />
-                  {t("advancedTest")}
-                </button>
-              </div>
-
-              <AutoHeight>
-                {standard ? (
-                    <motion.div
-                      key="standard"
-                      className="standard-settings"
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                    >
-                    <div className="standard-profile">
-                      <span><Network size={13} />TCP</span>
-                      <span><Layers3 size={13} />{t("streams", { count: STANDARD_PARALLEL_STREAMS })}</span>
-                      <span aria-label={t("bidirectionalDuration", { seconds: STANDARD_DURATION_SECONDS })}>
-                        <Waves size={13} />
-                        {t("standardBidirectionalDuration", { seconds: STANDARD_DURATION_SECONDS })}
-                      </span>
-                      <button
-                        type="button"
-                        className={`standard-rate-toggle ${form.rateLimitEnabled ? "is-enabled" : ""}`}
-                        disabled={busy}
-                        onClick={() => update("rateLimitEnabled", !form.rateLimitEnabled)}
-                        aria-label={`${t("rateLimit")}: ${t(form.rateLimitEnabled ? "limited" : "unlimited")}`}
-                      >
-                        <Gauge size={13} aria-hidden="true" />
-                        {t(form.rateLimitEnabled ? "limited" : "unlimited")}
-                      </button>
-                    </div>
-                    {form.rateLimitEnabled && (
-                        <motion.div
-                          className="target-rate-reveal standard-target-rate"
-                          initial={{ opacity: 0, y: -4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                        >
-                          <TargetRateInput
-                            value={form.targetBitrateMbps}
-                            disabled={busy}
-                            onChange={(value) => update("targetBitrateMbps", value)}
-                          />
-                        </motion.div>
-                    )}
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="advanced"
-                      className="advanced-settings"
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                    >
-                    <div className="advanced-segments">
-                      <div>
-                        <span className="compact-label">{t("protocol")}</span>
-                        <div className="mini-segmented">
-                          {(["tcp", "udp"] as const).map((value) => (
-                            <button
-                              key={value}
-                              type="button"
-                              className={form.protocol === value ? "selected" : ""}
-                              onClick={() => update("protocol", value)}
-                            >
-                              {value.toUpperCase()}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <span className="compact-label">{t("direction")}</span>
-                        <div className="mini-segmented icon-segmented">
-                          <button
-                            type="button"
-                            className={form.direction === "upload" ? "selected upload" : ""}
-                            onClick={() => update("direction", "upload")}
-                            aria-label={t("upload")}
-                            title={t("upload")}
-                          >
-                            <ArrowUpFromLine size={13} />
-                          </button>
-                          <button
-                            type="button"
-                            className={form.direction === "download" ? "selected download" : ""}
-                            onClick={() => update("direction", "download")}
-                            aria-label={t("download")}
-                            title={t("download")}
-                          >
-                            <ArrowDownToLine size={13} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="field-grid advanced-fields">
-                      <label>
-                        <FieldLabel icon={<Layers3 size={13} />}>{t("parallelStreams")}</FieldLabel>
-                        <input
-                          className="glass-input"
-                          type="number"
-                          min="1"
-                          max="32"
-                          value={form.parallelStreams}
-                          onChange={(event) => update("parallelStreams", event.target.value)}
-                        />
-                      </label>
-                      <label>
-                        <FieldLabel icon={<Clock3 size={13} />}>{t("duration")}</FieldLabel>
-                        <div className="duration-input">
-                          <input
-                            className="glass-input"
-                            type="number"
-                            min="0"
-                            max="120"
-                            value={form.durationSeconds}
-                            onChange={(event) => update("durationSeconds", event.target.value)}
-                          />
-                          <span>{form.durationSeconds === "0" ? t("continuous") : t("seconds")}</span>
-                        </div>
-                      </label>
-                    </div>
-                    <div className="advanced-rate-control">
-                      <label className="rate-limit-toggle">
-                        <span className="rate-limit-title">
-                          <Gauge size={13} aria-hidden="true" />
-                          {t("rateLimit")}
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={form.rateLimitEnabled}
-                          disabled={busy}
-                          onChange={(event) => update("rateLimitEnabled", event.target.checked)}
-                          aria-label={t("rateLimit")}
-                        />
-                        <span className="compact-switch" aria-hidden="true"><i /></span>
-                        <span className="rate-limit-state">
-                          {t(form.rateLimitEnabled ? "limited" : "unlimited")}
-                        </span>
-                      </label>
-                      {form.rateLimitEnabled && (
-                          <motion.div
-                            className="target-rate-reveal"
-                            initial={{ opacity: 0, y: -4 }}
-                            animate={{ opacity: 1, y: 0 }}
-                          >
-                            <TargetRateInput
-                              value={form.targetBitrateMbps}
-                              disabled={busy}
-                              onChange={(value) => update("targetBitrateMbps", value)}
-                            />
-                          </motion.div>
-                      )}
-                    </div>
-                    </motion.div>
-                )}
-              </AutoHeight>
-
-              <div className="form-actions">
-                <button type="submit" className="primary-action" disabled={!valid || busy}>
-                  <Play size={16} fill="currentColor" aria-hidden="true" />
-                  {standard ? t("startFullTest") : t("startTest")}
-                </button>
-                <button
-                  type="button"
-                  className="stop-action"
-                  onClick={stop}
-                  disabled={!busy}
-                  aria-label={t("stopTest")}
-                  title={t("stopTest")}
-                >
-                  <Square size={15} fill="currentColor" aria-hidden="true" />
-                </button>
-              </div>
-            </div>
+                <TestConfiguration
+                  form={form}
+                  standard={standard}
+                  busy={busy}
+                  valid={valid}
+                  onUpdate={update}
+                  onStop={() => void stop()}
+                />
           </form>
         </GlassPanel>
         </ConnectionShell>
 
         {!compactLayout && (
-          <div
-            className="layout-resizer"
-            role="separator"
-            tabIndex={0}
-            aria-label={t("resizePanels")}
-            aria-orientation="vertical"
-            aria-valuemin={Math.round(MIN_LAYOUT_SPLIT * 100)}
-            aria-valuemax={Math.round(MAX_LAYOUT_SPLIT * 100)}
-            aria-valuenow={Math.round(layoutSplit * 100)}
-            title={t("resizePanelsHelp")}
-            onDoubleClick={() => setLayoutSplit(DEFAULT_LAYOUT_SPLIT)}
+          <LayoutResizer
+            value={layoutSplit}
+            label={t("resizePanels")}
+            help={t("resizePanelsHelp")}
+            setValue={setLayoutSplit}
             onPointerDown={startLayoutResize}
             onPointerMove={moveLayoutResize}
             onPointerUp={stopLayoutResize}
-            onPointerCancel={stopLayoutResize}
-            onKeyDown={(event) => {
-              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-              event.preventDefault();
-              const direction = event.key === "ArrowLeft" ? -1 : 1;
-              setLayoutSplit((current) =>
-                Math.min(MAX_LAYOUT_SPLIT, Math.max(MIN_LAYOUT_SPLIT, current + direction * 0.02))
-              );
-            }}
-          >
-            <GripVertical size={15} aria-hidden="true" />
-          </div>
+          />
         )}
 
         <ResultsPanel

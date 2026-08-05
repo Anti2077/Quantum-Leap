@@ -6,7 +6,9 @@ use super::{
     parser::{add_tcp_latency_jitter, parse_sample, parse_text_sample, parse_udp_receiver_summary},
 };
 use crate::{
-    model::{RemoteTarget, TransferDirection, TransportProtocol},
+    model::{
+        RemoteTarget, TransferDirection, TransportProtocol, SPEED_SAMPLE_EVENT, SPEED_SUMMARY_EVENT,
+    },
     ssh::{connect, parse_remote_iperf_error, remote_client_command, SshError, CLIENT_PID_MARKER},
 };
 use std::{
@@ -98,7 +100,7 @@ fn run_blocking(
             if protocol == TransportProtocol::Udp {
                 if let Some(summary) = parse_udp_receiver_summary(line, direction, parallel_streams)
                 {
-                    let _ = app.emit("speed://summary", summary);
+                    let _ = app.emit(SPEED_SUMMARY_EVENT, summary);
                     continue;
                 }
                 if line.ends_with("sender") || line.ends_with("receiver") {
@@ -112,7 +114,7 @@ fn run_blocking(
                     add_tcp_latency_jitter(&mut sample, &mut previous_latency_ms);
                 }
                 output.sample_count += 1;
-                let _ = app.emit("speed://sample", sample);
+                let _ = app.emit(SPEED_SAMPLE_EVENT, sample);
             } else if let Some(error) = parse_error_line(line) {
                 output.error = Some(error);
             }

@@ -1,0 +1,74 @@
+{
+  "eventNames": {
+    "sample": "speed://sample",
+    "summary": "speed://summary",
+    "state": "speed://state",
+    "prompt": "speed://prompt"
+  },
+  "request": {
+    "language": "zh-CN",
+    "host": "198.51.100.20",
+    "sshPort": 2222,
+    "iperfPort": 5201,
+    "remoteIperfPath": "/opt/bin/iperf3",
+    "localBindIp": "",
+    "serverBindIp": "198.51.100.21",
+    "serverMode": "sshManaged",
+    "username": "server-user",
+    "password": "fixture-password",
+    "authMethod": "privateKey",
+    "privateKeyPath": "~/.ssh/server_ed25519",
+    "passphrase": "fixture-passphrase",
+    "testMode": "advanced",
+    "direction": "download",
+    "protocol": "udp",
+    "parallelStreams": 4,
+    "durationSeconds": 30,
+    "targetBitrateBps": 125000000,
+    "reuseExistingServer": false,
+    "allowHostKeyMismatch": true,
+    "testTopology": "remoteToRemote",
+    "remoteClient": {
+      "host": "203.0.113.10",
+      "sshPort": 22,
+      "remoteIperfPath": "/usr/local/bin/iperf3",
+      "bindIp": "203.0.113.11",
+      "username": "client-user",
+      "password": "fixture-client-password",
+      "authMethod": "password",
+      "privateKeyPath": "",
+      "passphrase": "",
+      "allowHostKeyMismatch": false
+    }
+  },
+  "events": {
+    "state": {
+      "phase": "running",
+      "message": "contract-state"
+    },
+    "prompt": {
+      "kind": "clientHostKeyMismatch",
+      "title": "contract-title",
+      "message": "contract-message",
+      "detail": "SHA256:contract"
+    },
+    "sample": {
+      "elapsed": 1.5,
+      "bandwidthBps": 125000000.0,
+      "bytes": 23456789,
+      "latencyMs": 12.5,
+      "jitterMs": 0.8,
+      "retransmits": 2,
+      "direction": "download"
+    },
+    "summary": {
+      "bandwidthBps": 120000000.0,
+      "bytes": 450000000,
+      "jitterMs": 0.9,
+      "lostPackets": 3,
+      "packets": 4200,
+      "lostPercent": 0.071,
+      "direction": "download"
+    }
+  }
+}

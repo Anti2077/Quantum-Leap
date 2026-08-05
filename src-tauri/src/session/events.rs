@@ -1,6 +1,9 @@
 use crate::{
     i18n::localize,
-    model::{PromptKind, SpeedPhase, SpeedPromptEvent, SpeedStateEvent, UiLanguage},
+    model::{
+        PromptKind, SpeedPhase, SpeedPromptEvent, SpeedStateEvent, UiLanguage, SPEED_PROMPT_EVENT,
+        SPEED_STATE_EVENT,
+    },
 };
 use tauri::{AppHandle, Emitter};
 
@@ -11,7 +14,7 @@ pub(super) fn emit_state(
     message: impl Into<String>,
 ) {
     let _ = app.emit(
-        "speed://state",
+        SPEED_STATE_EVENT,
         SpeedStateEvent {
             phase,
             message: localize(language, message.into()),
@@ -29,7 +32,7 @@ pub(super) fn emit_prompt(
 ) {
     emit_state(app, language, SpeedPhase::Confirming, "等待确认后继续");
     let _ = app.emit(
-        "speed://prompt",
+        SPEED_PROMPT_EVENT,
         SpeedPromptEvent {
             kind,
             title: localize(language, title.into()),
