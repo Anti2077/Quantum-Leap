@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: update-download-chart
@@ -17,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -27,13 +30,44 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Commit updated charts
+      - name: Check for updated charts
+        id: changes
         run: |
           if git diff --quiet -- docs/images/readme/downloads-*.svg; then
-            exit 0
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Push chart update branch
+        if: steps.changes.outputs.changed == 'true'
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C automation/download-chart
           git add docs/images/readme/downloads-*.svg
           git commit -m "Update release download chart"
-          git push
+          git push --force-with-lease origin HEAD:automation/download-chart
+
+      - name: Create and merge pull request
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pull_request_number=$(gh pr list \
+            --base main \
+            --head automation/download-chart \
+            --state open \
+            --json number \
+            --jq '.[0].number')
+
+          if [ -z "$pull_request_number" ]; then
+            pull_request_url=$(gh pr create \
+              --base main \
+              --head automation/download-chart \
+              --title "Update release download chart" \
+              --body "Refresh the release download chart with the latest GitHub Releases package counts.")
+            pull_request_number=${pull_request_url##*/}
+          fi
+
+          gh pr merge "$pull_request_number" --squash --delete-branch
