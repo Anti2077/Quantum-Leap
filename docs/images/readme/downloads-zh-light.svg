@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="920" height="440" viewBox="0 0 920 440" role="img" aria-labelledby="title description">
   <title id="title">Release 下载量</title>
-  <desc id="description">v1.0.0: 0, v1.0.1: 9, v1.1.0: 7, v1.1.1: 15, v1.2.0: 5, v1.3.0: 7, v1.3.1: 19, v1.4.0: 44, v1.4.1: 65, v1.4.2: 60</desc>
+  <desc id="description">v1.0.0: 0, v1.0.1: 9, v1.1.0: 7, v1.1.1: 15, v1.2.0: 5, v1.3.0: 7, v1.3.1: 19, v1.4.0: 44, v1.4.1: 65, v1.4.2: 65</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
     .heading { fill: #182230; font-size: 24px; font-weight: 700; }
@@ -15,7 +15,7 @@
   <text class="heading" x="32" y="45">Release 下载量</text>
   <text class="subtitle" x="32" y="69">GitHub Releases 中发布包与应用内更新包的下载次数</text>
   <text class="total-label" x="888" y="29" text-anchor="end">发布包累计下载</text>
-  <text class="total-value" x="888" y="61" text-anchor="end">231</text>
+  <text class="total-value" x="888" y="61" text-anchor="end">236</text>
   <g transform="translate(32 108)">
     <rect width="10" height="10" rx="2" fill="#f06f5e"/><text class="legend" x="17" y="10">macOS</text>
     <rect x="90" width="10" height="10" rx="2" fill="#2589d8"/><text class="legend" x="107" y="10">Windows</text>
@@ -62,9 +62,9 @@
   <rect x="733.7" y="243.9" width="46.7" height="9.7" fill="#d6a514"/>
   <text class="value" x="757.1" y="235.9" text-anchor="middle">65</text>
   <text class="axis" x="757.1" y="395" text-anchor="middle">v1.4.1</text>
-  <rect x="814.3" y="335.1" width="46.7" height="34.9" fill="#f06f5e"/>
-  <rect x="814.3" y="271.1" width="46.7" height="64.0" fill="#2589d8"/>
-  <rect x="814.3" y="253.6" width="46.7" height="17.5" fill="#d6a514"/>
-  <text class="value" x="837.7" y="245.6" text-anchor="middle">60</text>
+  <rect x="814.3" y="329.3" width="46.7" height="40.7" fill="#f06f5e"/>
+  <rect x="814.3" y="263.3" width="46.7" height="66.0" fill="#2589d8"/>
+  <rect x="814.3" y="243.9" width="46.7" height="19.4" fill="#d6a514"/>
+  <text class="value" x="837.7" y="235.9" text-anchor="middle">65</text>
   <text class="axis" x="837.7" y="395" text-anchor="middle">v1.4.2</text>
 </svg>
