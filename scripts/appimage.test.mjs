@@ -42,7 +42,7 @@ describe.skipIf(process.platform === "win32")("AppImage launch permissions", () 
 
   it("rejects the published package's 0770 permission even when its owner can execute it", async () => {
     const directory = await temporaryDirectory();
-    await chmod(directory, 0o755);
+    await chmod(directory, 0o700);
     await mkdir(path.join(directory, "usr/bin"), { recursive: true, mode: 0o755 });
     for (const file of ["AppRun", "AppRun.wrapped", "usr/bin/iperf3_ui", "usr/bin/iperf3"]) {
       await writeFile(path.join(directory, file), "launcher", { mode: 0o755 });

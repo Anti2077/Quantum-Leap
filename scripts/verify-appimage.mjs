@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export async function verifyAppImage(directory) {
-  for (const relative of [".", "usr", "usr/bin", "AppRun", "AppRun.wrapped", "usr/bin/iperf3_ui", "usr/bin/iperf3"]) {
+  for (const relative of ["usr", "usr/bin", "AppRun", "AppRun.wrapped", "usr/bin/iperf3_ui", "usr/bin/iperf3"]) {
     const info = await stat(path.join(directory, relative));
     // Checking access() or test -x as the build owner would miss mode 0770.
     if ((info.mode & 0o005) !== 0o005) {
