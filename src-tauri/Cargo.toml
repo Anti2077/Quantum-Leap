@@ -1,6 +1,6 @@
 [package]
 name = "iperf3_ui"
-version = "1.4.2"
+version = "1.4.3"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/Anti2077/Quantum-Leap"
