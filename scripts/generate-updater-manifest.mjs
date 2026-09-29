@@ -30,8 +30,8 @@ export function updaterAssets(version) {
   return {
     "darwin-aarch64": macOSUniversal,
     "darwin-x86_64": macOSUniversal,
-    "linux-x86_64": `Quantum-Leap_${version}_Linux_x86_64.AppImage`,
-    "linux-aarch64": `Quantum-Leap_${version}_Linux_aarch64.AppImage`
+    "linux-x86_64": `Quantum-Leap_${version}_x86_64.AppImage`,
+    "linux-aarch64": `Quantum-Leap_${version}_aarch64.AppImage`
   };
 }
 
