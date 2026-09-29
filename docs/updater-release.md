@@ -12,6 +12,8 @@ Quantum Leap uses Tauri's updater signature in addition to the operating-system 
 
 For Linux, manually dispatch the **Cross-platform desktop builds** workflow from the release tag and enable `release_build`. The workflow signs the updater artifacts and includes each `.sig` file in its uploaded build artifact. The Windows job always produces an unsigned portable ZIP; Windows updates open the GitHub Release page instead of using Tauri's installer updater.
 
+The Linux pre-bundle hook prepares Tauri's cached AppRun launcher with mode `0755` before packaging and updater signing. CI checks the extracted launcher and binary permissions and requires the AppImage to display a window under Xvfb. The AppImage and its signature are renamed together to the release names below; do not repack or otherwise change a signed AppImage.
+
 Build the Universal 2 macOS release in a logged-in GUI session with the updater key available outside the repository. The resulting application contains both `arm64` and `x86_64` executables:
 
 ```sh
@@ -29,10 +31,10 @@ Place the final, renamed updater artifacts and matching `.sig` files in one dire
 ```text
 Quantum-Leap_X.Y.Z_macOS_universal.app.tar.gz
 Quantum-Leap_X.Y.Z_macOS_universal.app.tar.gz.sig
-Quantum-Leap_X.Y.Z_Linux_x86_64.AppImage
-Quantum-Leap_X.Y.Z_Linux_x86_64.AppImage.sig
-Quantum-Leap_X.Y.Z_Linux_aarch64.AppImage
-Quantum-Leap_X.Y.Z_Linux_aarch64.AppImage.sig
+Quantum-Leap_X.Y.Z_x86_64.AppImage
+Quantum-Leap_X.Y.Z_x86_64.AppImage.sig
+Quantum-Leap_X.Y.Z_aarch64.AppImage
+Quantum-Leap_X.Y.Z_aarch64.AppImage.sig
 ```
 
 Generate the manifest after synchronizing the version in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`:

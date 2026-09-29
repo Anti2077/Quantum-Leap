@@ -38,7 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential curl file libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
-            librsvg2-dev patchelf libdbus-1-dev dbus-x11 gnome-keyring
+            librsvg2-dev patchelf libdbus-1-dev dbus-x11 gnome-keyring squashfs-tools xvfb xauth xdotool
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
@@ -67,16 +67,28 @@ jobs:
         run: |
           test -n "$TAURI_SIGNING_PRIVATE_KEY"
           npm run tauri:build -- --bundles appimage,deb --config src-tauri/tauri.updater.conf.json
+      - name: Normalize AppImage release name
+        run: |
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' -print -quit)
+          VERSION=$(node -p "require('./package.json').version")
+          RENAMED="$(dirname "$APPIMAGE")/Quantum-Leap_${VERSION}_x86_64.AppImage"
+          if [ "$APPIMAGE" != "$RENAMED" ]; then
+            mv "$APPIMAGE" "$RENAMED"
+            if [ -f "$APPIMAGE.sig" ]; then mv "$APPIMAGE.sig" "$RENAMED.sig"; fi
+          fi
       - name: Inspect Linux packages
         run: |
           APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' -print -quit)
           DEB=$(find src-tauri/target/release/bundle/deb -name '*.deb' -print -quit)
           chmod +x "$APPIMAGE"
-          (cd /tmp && "$GITHUB_WORKSPACE/$APPIMAGE" --appimage-extract >/dev/null)
-          find /tmp/squashfs-root -type f | grep -E '/iperf3$'
-          find /tmp/squashfs-root -type f | grep -E 'third-party/iperf3-LICENSE$'
-          find /tmp/squashfs-root -type f | grep -E '/LICENSE$'
-          find /tmp/squashfs-root -type f | grep -E '/THIRD_PARTY_NOTICES.md$'
+          APPDIR="$RUNNER_TEMP/appimage-extract"
+          unsquashfs -o "$("$APPIMAGE" --appimage-offset)" -d "$APPDIR" "$APPIMAGE" >/dev/null
+          node scripts/verify-appimage.mjs "$APPDIR"
+          bash scripts/smoke-test-appimage.sh "$APPIMAGE"
+          find "$APPDIR" -type f | grep -E '/iperf3$'
+          find "$APPDIR" -type f | grep -E 'third-party/iperf3-LICENSE$'
+          find "$APPDIR" -type f | grep -E '/LICENSE$'
+          find "$APPDIR" -type f | grep -E '/THIRD_PARTY_NOTICES.md$'
           dpkg-deb --contents "$DEB" | grep -E '/iperf3$'
           dpkg-deb --contents "$DEB" | grep -E 'third-party/iperf3-LICENSE$'
           dpkg-deb --contents "$DEB" | grep -E '/LICENSE$'
@@ -111,7 +123,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential curl file libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
-            librsvg2-dev patchelf libdbus-1-dev dbus-x11 gnome-keyring xdg-utils
+            librsvg2-dev patchelf libdbus-1-dev dbus-x11 gnome-keyring squashfs-tools xvfb xauth xdotool xdg-utils
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
@@ -140,6 +152,15 @@ jobs:
         run: |
           test -n "$TAURI_SIGNING_PRIVATE_KEY"
           npm run tauri:build -- --bundles appimage,deb --config src-tauri/tauri.updater.conf.json
+      - name: Normalize AppImage release name
+        run: |
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' -print -quit)
+          VERSION=$(node -p "require('./package.json').version")
+          RENAMED="$(dirname "$APPIMAGE")/Quantum-Leap_${VERSION}_aarch64.AppImage"
+          if [ "$APPIMAGE" != "$RENAMED" ]; then
+            mv "$APPIMAGE" "$RENAMED"
+            if [ -f "$APPIMAGE.sig" ]; then mv "$APPIMAGE.sig" "$RENAMED.sig"; fi
+          fi
       - name: Inspect Linux packages
         run: |
           APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' -print -quit)
@@ -147,12 +168,15 @@ jobs:
           chmod +x "$APPIMAGE"
           file "$APPIMAGE" | grep -F 'ARM aarch64'
           test "$(dpkg-deb --field "$DEB" Architecture)" = "arm64"
-          (cd /tmp && "$GITHUB_WORKSPACE/$APPIMAGE" --appimage-extract >/dev/null)
-          find /tmp/squashfs-root -type f | grep -E '/iperf3$'
-          find /tmp/squashfs-root -type f | grep -E 'third-party/iperf3-LICENSE$'
-          find /tmp/squashfs-root -type f | grep -E '/LICENSE$'
-          find /tmp/squashfs-root -type f | grep -E '/THIRD_PARTY_NOTICES.md$'
-          file "$(find /tmp/squashfs-root -type f -name iperf3 -print -quit)" | grep -F 'ARM aarch64'
+          APPDIR="$RUNNER_TEMP/appimage-extract"
+          unsquashfs -o "$("$APPIMAGE" --appimage-offset)" -d "$APPDIR" "$APPIMAGE" >/dev/null
+          node scripts/verify-appimage.mjs "$APPDIR"
+          bash scripts/smoke-test-appimage.sh "$APPIMAGE"
+          find "$APPDIR" -type f | grep -E '/iperf3$'
+          find "$APPDIR" -type f | grep -E 'third-party/iperf3-LICENSE$'
+          find "$APPDIR" -type f | grep -E '/LICENSE$'
+          find "$APPDIR" -type f | grep -E '/THIRD_PARTY_NOTICES.md$'
+          file "$(find "$APPDIR" -type f -name iperf3 -print -quit)" | grep -F 'ARM aarch64'
           dpkg-deb --contents "$DEB" | grep -E '/iperf3$'
           dpkg-deb --contents "$DEB" | grep -E 'third-party/iperf3-LICENSE$'
           dpkg-deb --contents "$DEB" | grep -E '/LICENSE$'

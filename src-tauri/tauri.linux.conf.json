@@ -1,5 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBundleCommand": "node scripts/prepare-appimage.mjs"
+  },
   "app": {
     "windows": [
       {
@@ -16,6 +19,7 @@
     ]
   },
   "bundle": {
+    "useLocalToolsDir": false,
     "targets": ["appimage", "deb"],
     "externalBin": ["binaries/iperf3"],
     "resources": {
